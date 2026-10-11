@@ -496,15 +496,11 @@ cp .env.example .env
 Example `.env.example`:
 
 ```dotenv
-# LLM configuration
-OPENAI_API_KEY=
-OPENAI_MODEL=
-
-# Use these fields instead when using Azure OpenAI
-AZURE_OPENAI_API_KEY=
-AZURE_OPENAI_ENDPOINT=
-AZURE_OPENAI_API_VERSION=
-AZURE_OPENAI_DEPLOYMENT=
+# LLM configuration (OpenAI-compatible providers)
+LLM_PROVIDER=groq
+GROQ_API_KEY=
+GROQ_MODEL=openai/gpt-oss-120b
+GROQ_BASE_URL=https://api.groq.com/openai/v1
 
 # Optional data providers
 NEWS_API_KEY=
@@ -524,6 +520,8 @@ MEMORY_DATABASE=agent_memory.db
 ```
 
 Do not commit `.env` or API keys to source control.
+
+Set `LLM_PROVIDER=groq` and provide `GROQ_API_KEY` to use Groq with `openai/gpt-oss-120b` (available on Groq's Free Plan within its rate limits). To use Hugging Face instead, set `LLM_PROVIDER=huggingface` and provide `HF_TOKEN`. Without an explicit provider, the app prefers configured Groq, then Hugging Face.
 
 ## Running the Project
 
