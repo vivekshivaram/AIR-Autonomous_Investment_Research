@@ -421,8 +421,15 @@ python-dotenv>=1.0.1
 # Structured models and validation
 pydantic>=2.8.0
 
-# LLM integration: select the provider used by the project
-openai>=1.40.0
+# Agent framework
+langgraph>=1.0
+langchain-core>=1.0
+tenacity>=8.2
+grandalf>=0.8
+
+# LLM integration: local Qwen3-1.7B from the Hugging Face Hub, run with Transformers
+transformers>=4.56.0
+torch>=2.3.0
 
 # News similarity and optional clustering
 scikit-learn>=1.5.0
@@ -437,8 +444,6 @@ pytest>=8.3.0
 pytest-mock>=3.14.0
 
 # Optional notebook export and formatting
-nbformat>=5.10.0
-nbconvert>=7.16.0
 ```
 
 SQLite support is included in the Python standard library through `sqlite3`; no separate package is required.
@@ -496,15 +501,8 @@ cp .env.example .env
 Example `.env.example`:
 
 ```dotenv
-# LLM configuration
-OPENAI_API_KEY=
-OPENAI_MODEL=
-
-# Use these fields instead when using Azure OpenAI
-AZURE_OPENAI_API_KEY=
-AZURE_OPENAI_ENDPOINT=
-AZURE_OPENAI_API_VERSION=
-AZURE_OPENAI_DEPLOYMENT=
+# Local LLM (no API key needed): a Hugging Face model id, loaded with Transformers
+LLM_MODEL=Qwen/Qwen3-1.7B
 
 # Optional data providers
 NEWS_API_KEY=
