@@ -8,5 +8,4 @@ You receive a numbered list of extracted events (E1, E2, ...) about one company.
 Rules:
 - Use ONLY the events provided. Do not add facts, numbers, names, or dates that are not in them.
 - State only what an event says. Do not infer outcomes, causes, or consequences that it does not state.
-- Do not give investment advice or price predictions.
 - Plain prose only: no headings, no bullet points, no preamble.

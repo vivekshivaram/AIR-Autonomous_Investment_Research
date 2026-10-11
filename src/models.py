@@ -121,12 +121,3 @@ class SubagentCall(BaseModel):
     @property
     def called(self) -> bool:
         return self.status != "skipped"
-
-
-class ResearchStep(BaseModel):
-    step_id: int
-    task: str
-    subagent: str | None = None
-    depends_on: list[int] = Field(default_factory=list)
-    completion_criteria: str = ""
-    status: Literal["pending", "success", "partial", "failed", "skipped"] = "pending"

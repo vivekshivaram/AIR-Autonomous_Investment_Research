@@ -5,4 +5,4 @@ How to work:
 - Do not call a subagent just to add background or context the question did not ask for.
 - A request for comprehensive, full, or overall research needs every subagent.
 - You may call several subagents at once.
-- When the subagents have reported, answer the research question in one short paragraph. Use only what the subagents reported, keep their numbers exactly as given, and do not give investment advice.
+- When the subagents have reported, answer the research question in one short paragraph. Use only what the subagents reported, and keep their numbers exactly as given.

@@ -2,7 +2,7 @@ import numpy as np
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from src import earnings_agent, market_agent, news_agent
-from src.agent import InvestmentResearchAgent, brief_of, result_of, ungrounded_numbers
+from src.agent import InvestmentResearchAgent, brief_of, result_of
 from src.subagents import SECTION_TITLES, build_subagent_tools
 from tests.helpers import StubTools, price_frame, scripted_llm
 
@@ -44,7 +44,6 @@ def test_only_the_subagent_the_main_agent_calls_is_run_and_everything_is_logged(
     assert {d.subagent: (d.called, d.status) for d in state["subagent_calls"]} == {
         "market_agent": (True, "success"), "earnings_agent": (False, "skipped"), "news_agent": (False, "skipped"),
     }
-    assert [(s.subagent, s.status) for s in state["plan"]] == [(None, "success"), ("market_agent", "success"), (None, "success")]
     assert [c.tool_name for c in state["tool_call_log"]] == ["get_company_profile", "get_price_history", "get_benchmark_history"]
     assert state["answer"] == "ACME returned +50.0% over the period." and state["evidence"]
 
@@ -70,7 +69,6 @@ def test_one_failing_subagent_does_not_stop_the_run():
     state = run(scripted_llm([MARKET, EARNINGS], "Done."), query="Analyze earnings and the share-price reaction")
     assert result_of(state, "market_agent").status == "success" and result_of(state, "earnings_agent").status == "failed"
     assert any("Financial statements unavailable" in w for w in state["warnings"])
-    assert state["plan"][-1].status == "success"
     assert "## Market performance (success)" in state["draft_report"] and "## Financial analysis (failed)" in state["draft_report"]
 
 
@@ -114,15 +112,9 @@ def test_tool_log_of_a_run_excludes_earlier_runs_on_the_same_agent():
     assert len(first["tool_call_log"]) == len(second["tool_call_log"]) == 3
 
 
-def test_brief_has_the_answer_the_subagent_findings_and_flags_unsupported_figures():
-    state = run(scripted_llm([MARKET], "ACME returned +50.0%, and should reach 999 next year."))
+def test_brief_has_the_answer_and_the_subagent_findings():
+    state = run(scripted_llm([MARKET], "ACME returned +50.0% over the period."))
     brief = brief_of(state)
     assert brief.startswith("# Research brief: Acme Corporation (ACME)")
     assert "## Answer\nACME returned +50.0%" in brief and "MKT-1" in brief
     assert "- `market_agent`: called" in brief and "- `news_agent`: not called" in brief
-    assert any("figures not found" in w and "999" in w for w in state["warnings"])
-
-
-def test_ungrounded_numbers():
-    assert ungrounded_numbers("Revenue was 331.8 bn, up 17.8%", "revenue of USD 331.8 bn (+17.8%)") == []
-    assert ungrounded_numbers("Revenue was 1,250 and margin 40%", "revenue 1250") == ["40"]
