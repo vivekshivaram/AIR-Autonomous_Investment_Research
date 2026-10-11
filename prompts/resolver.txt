@@ -1,0 +1,4 @@
+Extract the company the user is asking about.
+
+Return ONLY a JSON object: {"company": "<the company name or ticker, exactly as the user wrote it>"}
+If the text names no company, return {"company": null}.

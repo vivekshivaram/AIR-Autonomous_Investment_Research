@@ -1,0 +1,35 @@
+# Notebook
+notebook>=7.2.0
+ipykernel>=6.29.0
+ipywidgets>=8.1.0
+
+# Data handling and calculations
+pandas>=2.2.0
+numpy>=1.26.0
+
+# Market, financial, and news data (no API key required)
+yfinance>=0.2.54
+requests>=2.32.0
+python-dotenv>=1.0.1
+
+# Structured models and validation
+pydantic>=2.8.0
+
+# Agent framework
+langgraph>=1.0
+langchain-core>=1.0
+tenacity>=8.2  # retries for the data tools
+grandalf>=0.8  # draws LangGraph graphs as text
+
+# Local LLM (Qwen3-1.7B from the Hugging Face Hub, run with Transformers)
+transformers>=4.56.0
+torch>=2.3.0
+
+# News near-duplicate detection
+scikit-learn>=1.5.0
+
+# Visualizations
+matplotlib>=3.9.0
+
+# Testing
+pytest>=8.3.0
