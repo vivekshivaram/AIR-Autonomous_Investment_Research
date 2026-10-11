@@ -1,0 +1,3 @@
+# Optional packages for LLM_PROVIDER=local.
+# Install a PyTorch wheel that matches the machine's CPU/GPU separately before this file.
+transformers>=4.56.0

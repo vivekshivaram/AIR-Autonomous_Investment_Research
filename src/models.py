@@ -150,17 +150,36 @@ class ToolCallResult:
 class EvidenceItem:
     claim: str
     source: str
-    source_agent: str
+    source_agent: str = ""
     value: Any = None
     category: str = ""
     retrieved_at: str = field(default_factory=utc_now_iso)
     evidence_id: str = ""
+    id: str = ""
+    unit: str | None = None
+    kind: str = "calculated"
+    source_url: str | None = None
+    as_of: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.id and not self.evidence_id:
+            self.evidence_id = self.id
+        elif self.evidence_id and not self.id:
+            self.id = self.evidence_id
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    def model_dump(self) -> dict[str, Any]:
+        """Pydantic-compatible serialization for specialist display helpers."""
+        return self.to_dict()
+
     @classmethod
     def from_raw(cls, raw: Any, source_agent: str) -> "EvidenceItem":
+        if not isinstance(raw, (str, dict)):
+            model_dump = getattr(raw, "model_dump", None)
+            if callable(model_dump):
+                raw = model_dump()
         if isinstance(raw, str):
             return cls(claim=raw, source="unspecified", source_agent=source_agent)
         if not isinstance(raw, dict):
@@ -173,8 +192,14 @@ class EvidenceItem:
             source=str(raw.get("source") or raw.get("url") or "unspecified"),
             source_agent=source_agent,
             value=raw.get("value"),
-            category=str(raw.get("category") or ""),
+            category=str(raw.get("category") or raw.get("kind") or ""),
             retrieved_at=str(raw.get("retrieved_at") or utc_now_iso()),
+            evidence_id=str(raw.get("evidence_id") or raw.get("id") or ""),
+            id=str(raw.get("id") or raw.get("evidence_id") or ""),
+            unit=raw.get("unit"),
+            kind=str(raw.get("kind") or "calculated"),
+            source_url=raw.get("source_url") or raw.get("url"),
+            as_of=raw.get("as_of"),
         )
 
 
@@ -188,7 +213,9 @@ class SubagentResult:
     findings: list[Any] = field(default_factory=list)
     evidence: list[Any] = field(default_factory=list)
     risks: list[Any] = field(default_factory=list)
+    catalysts: list[Any] = field(default_factory=list)
     limitations: list[Any] = field(default_factory=list)
+    warnings: list[Any] = field(default_factory=list)
     visualization_data: dict[str, Any] = field(default_factory=dict)
     duration_ms: float = 0.0
 
@@ -200,6 +227,10 @@ class SubagentResult:
     @classmethod
     def from_raw(cls, raw: "SubagentResult | dict[str, Any]", expected_agent: str) -> "SubagentResult":
         """Validate and normalise whatever a subagent returned."""
+        if not isinstance(raw, (SubagentResult, dict)):
+            model_dump = getattr(raw, "model_dump", None)
+            if callable(model_dump):
+                raw = model_dump()
         if isinstance(raw, SubagentResult):
             result = raw
         elif isinstance(raw, dict):
@@ -213,7 +244,9 @@ class SubagentResult:
                 findings=list(raw.get("findings") or []),
                 evidence=list(raw.get("evidence") or []),
                 risks=list(raw.get("risks") or []),
+                catalysts=list(raw.get("catalysts") or []),
                 limitations=list(raw.get("limitations") or []),
+                warnings=list(raw.get("warnings") or []),
                 visualization_data=dict(raw.get("visualization_data") or {}),
             )
         else:
@@ -303,3 +336,6 @@ def validate_symbol(symbol: str) -> str:
     if not _SYMBOL_RE.match(cleaned):
         raise ValueError(f"Invalid stock symbol: {symbol!r}")
     return cleaned
+
+
+from .specialist_models import ExtractedNewsEvent, Finding, NewsArticle, SubagentInput

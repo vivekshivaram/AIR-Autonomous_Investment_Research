@@ -17,10 +17,11 @@ from types import ModuleType
 from typing import Any, Callable
 
 from .config import Settings
-from .llm_client import OpenAICompatClient, create_llm_client
+from .llm_client import create_llm_client
 from .models import SUBAGENT_EARNINGS, SUBAGENT_MARKET, SUBAGENT_NEWS
 from .orchestrator import Orchestrator
 from .planner import Planner
+from .specialist_adapters import adapt_specialist
 from .stubs import register_stub_subagents, register_stub_tools
 from .tool_registry import (
     APPROVED_TOOLS,
@@ -44,7 +45,7 @@ class Runtime:
     orchestrator: Orchestrator
     tools: ToolRegistry
     subagents: SubagentRegistry
-    llm: OpenAICompatClient
+    llm: Any
     # component -> "real" | "stub" | "missing"; shown in the notebook so nothing is silently faked
     integration: dict[str, str] = field(default_factory=dict)
 
@@ -61,7 +62,7 @@ def _load(module: str) -> ModuleType | None:
 
 def build_runtime(
     settings: Settings | None = None,
-    llm: OpenAICompatClient | None = None,
+    llm: Any = None,
     allow_stubs: bool = True,
 ) -> Runtime:
     settings = settings or Settings()
@@ -90,7 +91,7 @@ def build_runtime(
         mod = _load(module)
         fn = getattr(mod, attr, None) if mod else None
         if callable(fn):
-            subagents.attach(agent, fn)
+            subagents.attach(agent, adapt_specialist(agent, fn, llm, settings))
 
     if allow_stubs:
         stub_tools = register_stub_tools(tools)
@@ -102,6 +103,7 @@ def build_runtime(
     integration["data_tools"] = (
         "missing" if not (data_tools or stub_tools) else "real" if not stub_tools else "partial" if data_tools else "stub"
     )
+    integration["llm"] = getattr(llm, "provider", "unknown")
 
     report_module = _load("report_generator")
     pipeline = getattr(report_module, "run_report_pipeline", None) if report_module else None

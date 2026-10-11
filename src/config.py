@@ -72,13 +72,26 @@ class Settings:
     symbol: str = "AAPL"
     benchmark: str = "SPY"
     research_period_days: int = 365
-    news_lookback_days: int = 14
-    max_news_articles: int = 30
+    price_period: str = field(default_factory=lambda: os.getenv("PRICE_PERIOD", "1y"))
+    volatility_window: int = 21
+    news_lookback_days: int = field(default_factory=lambda: int(os.getenv("NEWS_LOOKBACK_DAYS", "30")))
+    max_news_articles: int = field(default_factory=lambda: int(os.getenv("MAX_NEWS_ARTICLES", "12")))
+    near_duplicate_threshold: float = field(default_factory=lambda: _env_float("NEAR_DUPLICATE_THRESHOLD", 0.45))
     quality_threshold: float = 80.0  # evaluator score out of 100
     max_refinement_cycles: int = 2
     max_plan_steps: int = 6
     max_question_chars: int = 1000
-    cache_dir: Path = PROJECT_ROOT / "data" / "cache"
+    request_timeout: int = 15
+    max_retries: int = 3
+    price_cache_hours: float = 6
+    news_cache_hours: float = 1
+    statement_cache_hours: float = 24
+    cache_dir: Path = field(default_factory=lambda: Path(os.getenv("CACHE_DIR", str(PROJECT_ROOT / "data" / "cache"))))
     db_path: Path = PROJECT_ROOT / "agent_memory.db"
     output_dir: Path = PROJECT_ROOT / "outputs"
+    prompts_dir: Path = PROJECT_ROOT / "prompts"
+    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "Qwen/Qwen3-1.7B"))
     llm: LLMConfig = field(default_factory=LLMConfig.groq_from_env)
+
+
+settings = Settings()

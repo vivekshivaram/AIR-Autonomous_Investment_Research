@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import asdict, is_dataclass
 from typing import Any, Callable, Iterable
 
 from .models import (
@@ -147,6 +148,8 @@ class Orchestrator:
                 step.status = result.status
                 step.result_summary = result.summary
                 message = result.summary
+                for warning in result.warnings:
+                    state.warn(step.subagent, str(warning), step_id=step.step_id)
                 if result.status == Status.FAILED:
                     state.warn(step.subagent, f"Subagent reported failure: {result.summary}", severity="error")
 
@@ -174,10 +177,21 @@ class Orchestrator:
         return returned if isinstance(returned, AgentState) else state
 
 
+def _as_dict(item: Any) -> dict[str, Any]:
+    if isinstance(item, dict):
+        return dict(item)
+    model_dump = getattr(item, "model_dump", None)
+    if callable(model_dump):
+        return model_dump()
+    if is_dataclass(item):
+        return asdict(item)
+    return {"text": str(item)}
+
+
 def _tagged(items: list[Any], agent: str) -> list[dict[str, Any]]:
     tagged = []
     for item in items:
-        entry = dict(item) if isinstance(item, dict) else {"text": str(item)}
+        entry = _as_dict(item)
         entry.setdefault("agent", agent)
         tagged.append(entry)
     return tagged
@@ -188,18 +202,24 @@ def aggregate_results(state: AgentState) -> dict[str, Any]:
     agents: dict[str, Any] = {}
     findings: list[dict[str, Any]] = []
     risks: list[dict[str, Any]] = []
+    catalysts: list[dict[str, Any]] = []
     limitations: list[dict[str, Any]] = []
     evidence: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    visualization_data: dict[str, Any] = {}
+    seen: dict[tuple[str, str], str] = {}
+    used_ids: set[str] = set()
+    finding_maps: dict[str, dict[str, str]] = {}
+    results: dict[str, dict[str, Any]] = {}
 
     for name in ALL_SUBAGENTS:
         result = state.get_result(name)
         if result is None:
             continue
+        results[name] = result
         agents[name] = {"status": result["status"], "summary": result["summary"]}
-        findings += _tagged(result["findings"], name)
-        risks += _tagged(result["risks"], name)
-        limitations += _tagged(result["limitations"], name)
+        if result.get("visualization_data"):
+            visualization_data[name] = result["visualization_data"]
+        id_map: dict[str, str] = {}
         for raw in result["evidence"]:
             try:
                 item = EvidenceItem.from_raw(raw, name)
@@ -207,11 +227,30 @@ def aggregate_results(state: AgentState) -> dict[str, Any]:
                 state.warn(name, f"Dropped malformed evidence item: {exc}")
                 continue
             key = (item.claim.strip().lower(), item.source)
-            if key in seen:
-                continue
-            seen.add(key)
-            item.evidence_id = f"EV-{len(evidence) + 1:03d}"
-            evidence.append(item.to_dict())
+            original_id = item.id or item.evidence_id
+            canonical_id = seen.get(key)
+            if canonical_id is None:
+                canonical_id = original_id or f"EV-{len(evidence) + 1:03d}"
+                if canonical_id in used_ids:
+                    canonical_id = f"EV-{len(evidence) + 1:03d}"
+                used_ids.add(canonical_id)
+                seen[key] = canonical_id
+                item.id = item.evidence_id = canonical_id
+                evidence.append(item.to_dict())
+            if original_id:
+                id_map[original_id] = canonical_id
+        finding_maps[name] = id_map
+
+    for name, result in results.items():
+        normalized_findings = _tagged(result["findings"], name)
+        for finding in normalized_findings:
+            ids = finding.get("evidence_ids")
+            if isinstance(ids, list):
+                finding["evidence_ids"] = [finding_maps[name].get(str(item), str(item)) for item in ids]
+        findings += normalized_findings
+        risks += _tagged(result["risks"], name)
+        catalysts += _tagged(result.get("catalysts", []), name)
+        limitations += _tagged(result["limitations"], name)
 
     # Selected-but-unfinished work is surfaced as a limitation so reports never imply coverage.
     coverage: dict[str, str] = {}
@@ -231,8 +270,10 @@ def aggregate_results(state: AgentState) -> dict[str, Any]:
         "coverage": coverage,
         "findings": findings,
         "risks": risks,
+        "catalysts": catalysts,
         "limitations": limitations,
         "evidence": evidence,
+        "visualization_data": visualization_data,
         "warnings": [w.to_dict() for w in state.warnings],
         "memories_used": state.memories_used,
         "aggregated_at": utc_now_iso(),

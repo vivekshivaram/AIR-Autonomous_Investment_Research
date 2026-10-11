@@ -1,7 +1,15 @@
 openai>=1.50
 python-dotenv>=1.0
-pandas>=2.0
+truststore>=0.9
+pandas>=2.2
+numpy>=1.26
 matplotlib>=3.8
+yfinance>=0.2.54
+requests>=2.32
+tenacity>=8.2
+scikit-learn>=1.5
+pydantic>=2.8
 pytest>=8.0
 ipykernel>=6.0
-truststore>=0.9
+notebook>=7.2
+ipywidgets>=8.1

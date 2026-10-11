@@ -2,6 +2,12 @@
 
 A Python-based autonomous investment research system that plans research tasks, dynamically selects tools and specialist subagents, analyzes market, financial, and news data, evaluates its own output, improves weak sections, and learns across runs.
 
+## Current Integration Status
+
+The runnable path integrates Engineer 1's Planner/Orchestrator with Engineer 2's data connectors, market and earnings analysis, and five-stage news chain. Groq and Hugging Face API clients are preferred; local Qwen is opt-in. Engineer 3's report generator, evaluator/optimizer, reflection, and memory modules are not present yet, so `build_runtime()` reports those handoffs as `missing` and preserves `state.aggregated` for integration.
+
+The notebook demonstrates planning, conditional routing, scoped tool calls, real specialist outputs, charts, and every news-chain stage. See [Plans/integration_plan.md](Plans/integration_plan.md) for the merge scope and verification record.
+
 ## Project Objectives
 
 The project demonstrates the following required capabilities.
@@ -397,49 +403,7 @@ Shared deterministic utilities:
 
 ## Required Python Packages
 
-Create `requirements.txt` with the following modules:
-
-```text
-# Notebook and display
-jupyter>=1.1.1
-notebook>=7.2.0
-ipykernel>=6.29.0
-ipywidgets>=8.1.0
-
-# Data handling and calculations
-pandas>=2.2.0
-numpy>=1.26.0
-scipy>=1.13.0
-
-# Market and financial data
-yfinance>=0.2.54
-
-# HTTP and configuration
-requests>=2.32.0
-python-dotenv>=1.0.1
-
-# Structured models and validation
-pydantic>=2.8.0
-
-# LLM integration: select the provider used by the project
-openai>=1.40.0
-
-# News similarity and optional clustering
-scikit-learn>=1.5.0
-
-# Visualizations
-matplotlib>=3.9.0
-seaborn>=0.13.2
-plotly>=5.23.0
-
-# Testing
-pytest>=8.3.0
-pytest-mock>=3.14.0
-
-# Optional notebook export and formatting
-nbformat>=5.10.0
-nbconvert>=7.16.0
-```
+The default dependencies for the API-backed workflow, data tools, notebook, and charts are listed in `requirements.txt`.
 
 SQLite support is included in the Python standard library through `sqlite3`; no separate package is required.
 
@@ -452,32 +416,13 @@ git clone <repository-url>
 cd investment-research-agent
 ```
 
-### 2. Create a virtual environment
+### 2. Install dependencies in the selected Python 3.11 environment
 
 ```bash
-python -m venv .venv
+python -m pip install -r requirements.txt
 ```
 
-Activate it on Windows PowerShell:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-Activate it on Linux or macOS:
-
-```bash
-source .venv/bin/activate
-```
-
-### 3. Install dependencies
-
-```bash
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 4. Register the Jupyter kernel
+### 3. Register the Jupyter kernel
 
 ```bash
 python -m ipykernel install --user \
@@ -493,35 +438,9 @@ Create `.env` from `.env.example`:
 cp .env.example .env
 ```
 
-Example `.env.example`:
-
-```dotenv
-# LLM configuration (OpenAI-compatible providers)
-LLM_PROVIDER=groq
-GROQ_API_KEY=
-GROQ_MODEL=openai/gpt-oss-120b
-GROQ_BASE_URL=https://api.groq.com/openai/v1
-
-# Optional data providers
-NEWS_API_KEY=
-FRED_API_KEY=
-
-# Required for responsible SEC requests
-SEC_USER_AGENT=InvestmentResearchAgent your-email@example.com
-
-# Application settings
-DEFAULT_SYMBOL=MSFT
-DEFAULT_BENCHMARK=SPY
-QUALITY_THRESHOLD=80
-MAX_REFINEMENT_CYCLES=2
-NEWS_LOOKBACK_DAYS=30
-MAX_NEWS_ARTICLES=20
-MEMORY_DATABASE=agent_memory.db
-```
-
 Do not commit `.env` or API keys to source control.
 
-Set `LLM_PROVIDER=groq` and provide `GROQ_API_KEY` to use Groq with `openai/gpt-oss-120b` (available on Groq's Free Plan within its rate limits). To use Hugging Face instead, set `LLM_PROVIDER=huggingface` and provide `HF_TOKEN`. Without an explicit provider, the app prefers configured Groq, then Hugging Face.
+Leave `LLM_PROVIDER` unset to prefer configured Groq, then Hugging Face. Set it to `groq` or `huggingface` to select one explicitly. The local model is selected only with `LLM_PROVIDER=local`; install `requirements-local-llm.txt` and a PyTorch build suitable for the machine first. For Blackwell GPUs, use a CUDA 12.8-compatible PyTorch build and avoid later installs that replace it.
 
 ## Running the Project
 
@@ -564,26 +483,19 @@ To demonstrate routing, also run narrower questions:
 "Analyze the latest earnings announcement and resulting share-price movement."
 ```
 
-## Notebook Sections
+## Current Notebook Sections
 
-The notebook should contain these sections in order:
+The notebook currently demonstrates:
 
-1. Project overview and scoring matrix
-2. Imports and configuration
-3. Shared models and tool registry
-4. Data-source health check
-5. Planning demonstration
-6. Routing demonstration
-7. Market Subagent execution
-8. Earnings Subagent execution
-9. News Prompt Chaining demonstration
-10. Evidence aggregation
-11. Initial report generation
-12. Evaluator–Optimizer demonstration
-13. Self-reflection
-14. Memory storage
-15. Second-run learning demonstration
-16. Final visualizations and conclusions
+1. Runtime integration status
+2. Planning and task routing
+3. Conditional tool permissions and execution logs
+4. Partial-failure behavior
+5. Real market and earnings analysis with chart-ready data
+6. News ingest, preprocess, classify, extract, and summarize outputs
+7. Evidence aggregation and the Engineer 3 handoff
+
+Report generation, evaluation/optimization, reflection, and persistent learning remain pending Engineer 3 integration.
 
 ## Scoring Demonstration Checklist
 

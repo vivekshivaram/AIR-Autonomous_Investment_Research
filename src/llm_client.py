@@ -181,15 +181,19 @@ def _parse_json_object(text: str, provider: str) -> dict[str, Any]:
     return parsed
 
 
-def create_llm_client() -> OpenAICompatClient:
-    """Pick from LLM_PROVIDER (groq | huggingface); default prefers configured Groq, then HF."""
+def create_llm_client() -> Any:
+    """Pick Groq/Hugging Face by default; load the local backend only when explicitly selected."""
     provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+    if provider == "local":
+        from .local_llm import LocalQwenClient
+
+        return LocalQwenClient()
     if provider in {"hf", "huggingface"}:
         return HuggingFaceClient()
     if provider == "groq":
         return GroqClient()
     if provider:
-        raise ValueError(f"Unsupported LLM_PROVIDER {provider!r}; choose groq or huggingface.")
+        raise ValueError(f"Unsupported LLM_PROVIDER {provider!r}; choose groq or huggingface, or explicitly select local.")
     groq = GroqClient()
     if groq.available:
         return groq
