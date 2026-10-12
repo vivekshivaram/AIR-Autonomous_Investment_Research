@@ -11,6 +11,7 @@ import pickle
 import re
 import time
 from datetime import datetime, timezone
+from typing import Any, Callable
 
 from .config import settings
 
@@ -53,7 +54,11 @@ def extract_json(text: str):
     return None
 
 
-def disk_cache(ttl_hours: float):
+def disk_cache(
+    ttl_hours: float,
+    version: int = 1,
+    should_cache: Callable[[Any], bool] | None = None,
+):
     """Cache a function's return value on disk, keyed by its name and arguments.
 
     Keeps notebook re-runs fast and avoids hammering free data providers. Errors are
@@ -63,16 +68,17 @@ def disk_cache(ttl_hours: float):
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            key_source = json.dumps([fn.__qualname__, args, kwargs], sort_keys=True, default=str)
+            key_source = json.dumps([version, fn.__qualname__, args, kwargs], sort_keys=True, default=str)
             key = hashlib.sha1(key_source.encode()).hexdigest()[:16]
             path = settings.cache_dir / f"{fn.__name__}_{key}.pkl"
             if path.exists() and time.time() - path.stat().st_mtime < ttl_hours * 3600:
                 with path.open("rb") as handle:
                     return pickle.load(handle)
             result = fn(*args, **kwargs)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("wb") as handle:
-                pickle.dump(result, handle)
+            if should_cache is None or should_cache(result):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("wb") as handle:
+                    pickle.dump(result, handle)
             return result
 
         return wrapper

@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel
 
-from .config import Settings, settings as default_settings
+from .config import PROJECT_ROOT, Settings, settings as default_settings
 from .data_tools import DataToolError, company_terms
-from .llm import json_chain, load_prompt, text_chain
 from .models import ExtractedNewsEvent, NewsArticle
 from .tool_registry import ToolRegistry
 from .utils import clean_text, utc_now
@@ -38,19 +39,58 @@ NOISE_PATTERN = re.compile(
 )
 
 
+def _load_prompt(name: str) -> str:
+    return (PROJECT_ROOT / "prompts" / f"{name}.txt").read_text(encoding="utf-8").strip()
+
+
+def _json_answer(llm: Any, prompt: str, user: str, schema_name: str, schema: dict[str, Any]) -> dict[str, Any]:
+    chat_json = getattr(llm, "chat_json", None)
+    if callable(chat_json):
+        try:
+            return chat_json(
+                [{"role": "system", "content": prompt}, {"role": "user", "content": user}],
+                schema,
+                schema_name=schema_name,
+            )
+        except Exception:
+            return {}
+    return {}
+
+
+def _json_answers(
+    llm: Any, prompt: str, users: list[str], schema_name: str, schema: dict[str, Any]
+) -> list[dict[str, Any]]:
+    return [_json_answer(llm, prompt, user, schema_name, schema) for user in users]
+
+
+def _text_answer(llm: Any, prompt: str, user: str) -> str:
+    chat = getattr(llm, "chat", None)
+    if callable(chat):
+        try:
+            return str(chat([{"role": "system", "content": prompt}, {"role": "user", "content": user}])).strip()
+        except Exception:
+            return ""
+    return ""
+
+
 # ============================================================ Stage 1: Ingest
-def ingest_news(symbol: str, company_name: str, tools: ToolRegistry) -> tuple[list[NewsArticle], dict[str, str]]:
+def ingest_news(
+    symbol: str, company_name: str, tools: ToolRegistry, settings: Settings = default_settings
+) -> tuple[list[NewsArticle], dict[str, str]]:
     """Retrieve recent headlines through the registered news tool.
 
     Returns the articles and the errors of any feed that failed (empty when all feeds worked).
     """
     call = tools.call(
-        "get_company_news", symbol=symbol, company_name=company_name, lookback_days=default_settings.news_lookback_days
+        "get_company_news", symbol=symbol, company_name=company_name, lookback_days=settings.news_lookback_days
     )
     if not call.ok:
         raise DataToolError(call.error)
     articles = [
-        NewsArticle(id=f"A{index:03d}", **{k: v for k, v in article.items() if v is not None})
+        NewsArticle(
+            id=f"A{index:03d}",
+            **{"retrieved_at": call.data.get("retrieved_at"), **{k: v for k, v in article.items() if v is not None}},
+        )
         for index, article in enumerate(call.data["articles"], start=1)
     ]
     return articles, call.data.get("feed_errors", {})
@@ -185,7 +225,18 @@ def _choice(value, allowed: list[str]) -> str:
 def classify_news(clean_articles: list[NewsArticle], llm, company_name: str, symbol: str) -> list[NewsArticle]:
     """Label each article with event type, relevance, impact, and time horizon."""
     prompts = [_article_prompt(article, company_name, symbol) for article in clean_articles]
-    answers = json_chain(llm, load_prompt("news_classifier")).batch(prompts)
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["event_type", "relevance", "impact", "time_horizon"],
+        "properties": {
+            "event_type": {"type": "string", "enum": EVENT_TYPES},
+            "relevance": {"type": "string", "enum": RELEVANCE},
+            "impact": {"type": "string", "enum": IMPACT},
+            "time_horizon": {"type": "string", "enum": HORIZONS},
+        },
+    }
+    answers = _json_answers(llm, _load_prompt("news_classifier"), prompts, "news_classification", schema)
     return [
         article.model_copy(
             update={
@@ -229,7 +280,20 @@ def extract_news_events(
     material = [a for a in classified_articles if a.relevance != "low" or a.duplicate_count >= 2]
     material.sort(key=lambda a: (RELEVANCE + [UNKNOWN]).index(a.relevance))
     prompts = [_article_prompt(article, company_name, symbol) for article in material]
-    answers = json_chain(llm, load_prompt("news_extractor")).batch(prompts)
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["event", "entities", "figures", "dates", "risks", "catalysts"],
+        "properties": {
+            "event": {"type": "string"},
+            "entities": {"type": "array", "items": {"type": "string"}},
+            "figures": {"type": "array", "items": {"type": "string"}},
+            "dates": {"type": "array", "items": {"type": "string"}},
+            "risks": {"type": "array", "items": {"type": "string"}},
+            "catalysts": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    answers = _json_answers(llm, _load_prompt("news_extractor"), prompts, "news_extraction", schema)
     events = []
     for index, (article, answer) in enumerate(zip(material, answers), start=1):
         source_text = f"{article.title} {article.summary}"
@@ -253,6 +317,7 @@ def extract_news_events(
                 time_horizon=article.time_horizon,
                 source=article.publisher,
                 url=article.url,
+                retrieved_at=article.retrieved_at,
             )
         )
     return events
@@ -272,7 +337,7 @@ def summarize_news(extracted_events: list[ExtractedNewsEvent], llm, company_name
         f"{e.id} | {e.event_date} | {e.source} | {e.event_type} | {e.impact} | {e.event}" for e in extracted_events
     )
     user = f"Company: {company_name} ({symbol})\n\nEvents (id | date | source | type | impact | event):\n{event_lines}"
-    text = clean_text(text_chain(llm, load_prompt("news_summarizer")).invoke(user))
+    text = clean_text(_text_answer(llm, _load_prompt("news_summarizer"), user))
 
     valid_ids = {event.id for event in extracted_events}
     cited = list(dict.fromkeys(re.findall(r"E\d+", text)))

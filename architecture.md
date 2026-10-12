@@ -378,3 +378,41 @@ Engineer 3 owns Evaluation, Memory, and Visualization:
 - Limit evaluator refinement cycles.
 - Treat memory as planning guidance, not current evidence.
 - Prefer a transparent custom Python workflow over a complex agent framework.
+
+## 13. Engineer 1 Implementation: Interfaces and Execution Flow
+
+### Modules
+
+| Module | Role |
+| --- | --- |
+| `src/models.py` | `AgentState`, `ResearchPlan`, `ResearchStep`, `RoutingDecision`, `ToolCallResult`, `SubagentResult`, `EvidenceItem`, `MemoryItem`, `Issue`, `Status` |
+| `src/config.py` | `Settings` and `LLMConfig`; `GROQ_API_KEY` is read from the environment or `.env` |
+| `src/llm_client.py` | `GroqClient`: OpenAI-compatible endpoint, strict JSON-schema outputs; default model `openai/gpt-oss-120b` |
+| `src/planner.py` | Question interpretation, plan generation, routing, lesson hints, plan validation, rule-based fallback |
+| `src/tool_registry.py` | Approved tool whitelist, `ToolSession` (per-step tool scoping and logging), subagent registry |
+| `src/orchestrator.py` | Dependency-ordered execution, failure containment, evidence aggregation, report hand-off |
+| `src/bootstrap.py` | Wires Engineer 2/3 modules into registries; uses clearly labelled stubs for anything not yet merged |
+
+### Execution flow
+
+1. `Orchestrator.plan()` retrieves lessons (`memory_retriever`), then `Planner.create_plan()` builds and validates the plan.
+2. The Planner asks the configured LLM for a structured plan; on any LLM or validation failure it uses deterministic keyword routing and records a warning.
+3. Lesson hints (`require_subagents`, `extra_criteria`) are applied deterministically after planning.
+4. Every registered subagent receives a selected or skipped `RoutingDecision` with a reason and confidence.
+5. `Orchestrator.run()` fetches the company profile, then executes steps in topological order. A subagent receives a `ToolSession` that only allows the tools named in its plan step.
+6. Subagent output is validated against `SubagentResult`. Exceptions, schema violations and failed tools become warnings; a step marked `blocking` is skipped when a dependency fails.
+7. `aggregate_results()` merges findings, risks, limitations and de-duplicated evidence (`EV-001`...) into `state.aggregated`, and adds a limitation for any selected subagent that did not complete.
+8. `report_pipeline(state)` (Engineer 3) is called if available; its failure is contained.
+
+### Integration contract
+
+```text
+data_tools        one function per approved tool name, e.g. get_price_history(symbol, ...)
+market_agent      run_market_agent(state, tools: ToolSession, step) -> SubagentResult | dict
+earnings_agent    run_earnings_agent(state, tools, step)
+news_agent        run_news_agent(state, tools, step)
+memory            retrieve_lessons(symbol, question) -> list[MemoryItem | dict]; store_lesson(...)
+report_generator  run_report_pipeline(state) -> AgentState
+```
+
+Subagents call tools with `tools.call("get_price_history", symbol=...)`, which returns a `ToolCallResult` (never raises) and appends a log entry to `state.tool_call_log`.

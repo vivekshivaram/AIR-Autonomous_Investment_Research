@@ -9,10 +9,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .config import settings
+from .config import Settings, settings
 from .evidence import EvidenceBuilder
 from .macro_context import get_macro_context
-from .models import Finding, SubagentInput, SubagentResult
+from .models import Finding, SubagentInput
+from .specialist_models import SpecialistResult as SubagentResult
 from .tool_registry import ToolRegistry
 
 AGENT_NAME = "market_agent"
@@ -70,12 +71,12 @@ def trailing_returns(close: pd.Series, windows: dict[str, int] = TRAILING_WINDOW
 
 
 # ------------------------------------------------------------------- agent
-def run_market_agent(task: SubagentInput, tools: ToolRegistry) -> SubagentResult:
+def run_market_agent(task: SubagentInput, tools: ToolRegistry, run_settings: Settings = settings) -> SubagentResult:
     """Analyze the stock's price history against the benchmark and return the standard result."""
-    symbol, benchmark = task.symbol, settings.benchmark
+    symbol, benchmark = task.symbol, run_settings.benchmark
     result = SubagentResult(agent=AGENT_NAME, status="success")
 
-    price_call = tools.call("get_price_history", symbol=symbol, period=settings.price_period)
+    price_call = tools.call("get_price_history", symbol=symbol, period=run_settings.price_period)
     if not price_call.ok:
         return SubagentResult(
             agent=AGENT_NAME, status="failed", warnings=[f"Price history unavailable for {symbol}: {price_call.error}"],
@@ -85,7 +86,7 @@ def run_market_agent(task: SubagentInput, tools: ToolRegistry) -> SubagentResult
     close = prices["close"]
 
     # Losing the benchmark downgrades the result to partial; it never produces an invented number.
-    bench_call = tools.call("get_benchmark_history", benchmark=benchmark, period=settings.price_period)
+    bench_call = tools.call("get_benchmark_history", benchmark=benchmark, period=run_settings.price_period)
     bench_close = None
     if bench_call.ok:
         # Keep only the dates both series share, so every comparison covers the same window.
@@ -106,7 +107,7 @@ def run_market_agent(task: SubagentInput, tools: ToolRegistry) -> SubagentResult
     e_return = evidence.add(f"{symbol} total return from {start} to {end}", round(stock_return * 100, 2), "%")
     e_vol = evidence.add(f"{symbol} annualized volatility of daily returns", round(stock_vol * 100, 2), "%")
     performance = pd.DataFrame({symbol: close / close.iloc[0] * 100})
-    volatility = pd.DataFrame({symbol: rolling_volatility(returns, settings.volatility_window) * 100})
+    volatility = pd.DataFrame({symbol: rolling_volatility(returns, run_settings.volatility_window) * 100})
 
     if bench_close is not None:
         bench_returns = daily_returns(bench_close)
@@ -136,7 +137,7 @@ def run_market_agent(task: SubagentInput, tools: ToolRegistry) -> SubagentResult
         if stock_beta > 1.2:
             result.risks.append(f"Beta of {stock_beta:.2f} means above-market sensitivity to broad sell-offs.")
         performance[benchmark] = bench_close / bench_close.iloc[0] * 100
-        volatility[benchmark] = rolling_volatility(bench_returns, settings.volatility_window) * 100
+        volatility[benchmark] = rolling_volatility(bench_returns, run_settings.volatility_window) * 100
         comparison = f" against {bench_return:+.1%} for {benchmark}"
     else:
         result.findings += [
@@ -190,6 +191,8 @@ def run_market_agent(task: SubagentInput, tools: ToolRegistry) -> SubagentResult
         macro_findings, macro_limitations = get_macro_context(task.profile, tools, evidence)
         result.findings += macro_findings
         result.limitations += macro_limitations
+        if macro_limitations:
+            result.status = "partial"
 
     result.evidence = evidence.items
     result.limitations += [

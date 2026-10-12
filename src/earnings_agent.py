@@ -6,9 +6,9 @@ Calculations are deterministic Python (no LLM) so every figure is reproducible.
 from __future__ import annotations
 
 import pandas as pd
-
 from .evidence import EvidenceBuilder
-from .models import Finding, SubagentInput, SubagentResult
+from .models import Finding, SubagentInput
+from .specialist_models import SpecialistResult as SubagentResult
 from .tool_registry import ToolRegistry
 from .utils import safe_float
 
@@ -165,8 +165,8 @@ def run_earnings_agent(task: SubagentInput, tools: ToolRegistry) -> SubagentResu
             result.risks.append(f"Debt-to-equity of {leverage:.2f}x indicates high financial leverage.")
 
     # Optional: point to the primary source documents on SEC EDGAR.
-    filings_call = tools.call("get_sec_filings", symbol=symbol)
-    if filings_call.ok:
+    filings_call = tools.call("get_sec_filings", symbol=symbol) if "get_sec_filings" in tools.allowed else None
+    if filings_call and filings_call.ok:
         filing = filings_call.data.iloc[0]
         filing_id = evidence.add(
             f"Latest periodic SEC filing: form {filing['form']} for the period ended {filing['report_date']}",
@@ -180,7 +180,8 @@ def run_earnings_agent(task: SubagentInput, tools: ToolRegistry) -> SubagentResu
                 evidence_ids=[filing_id],
             )
         )
-    else:
+    elif filings_call:
+        result.status = "partial"
         result.limitations.append(f"SEC filing references unavailable ({filings_call.error}).")
 
     growth_text = f"{rev_yoy:+.1%}" if rev_yoy is not None else "n/a"

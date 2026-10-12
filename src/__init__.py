@@ -1,1 +1,1 @@
-"""Autonomous investment research agent."""
+"""Autonomous Investment Research agent package."""

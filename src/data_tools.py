@@ -19,6 +19,13 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
+try:
+    import truststore
+
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
 import pandas as pd
 import requests
 import yfinance as yf
@@ -109,9 +116,32 @@ def company_terms(symbol: str, company_name: str) -> list[str]:
 def get_company_profile(symbol: str) -> dict:
     """Validate the ticker and return basic company identity."""
     symbol = normalize_symbol(symbol)
-    info = yf.Ticker(symbol).info or {}
+    ticker = yf.Ticker(symbol)
+    info = ticker.info or {}
     if not info.get("quoteType") or not (info.get("longName") or info.get("shortName")):
-        raise DataToolError(f"Unknown symbol: {symbol}")
+        match = next(
+            (
+                quote
+                for quote in (yf.Search(symbol, max_results=8, timeout=settings.request_timeout).quotes or [])
+                if quote.get("symbol") == symbol and quote.get("quoteType") == "EQUITY"
+            ),
+            None,
+        )
+        if match is None:
+            raise DataToolError(f"Unknown symbol: {symbol}")
+        info = {
+            "quoteType": match.get("quoteType"),
+            "longName": match.get("longname") or match.get("shortname"),
+            "shortName": match.get("shortname"),
+            "sector": match.get("sector"),
+            "industry": match.get("industry"),
+            "country": match.get("country"),
+            "exchange": match.get("exchange"),
+        }
+        try:
+            info["currency"] = ticker.fast_info.get("currency")
+        except Exception:
+            info["currency"] = None
     return {
         "symbol": symbol,
         "name": info.get("longName") or info.get("shortName"),
@@ -265,7 +295,11 @@ def _fetch_google_news(symbol: str, company_name: str, lookback_days: int) -> li
     return articles
 
 
-@disk_cache(ttl_hours=settings.news_cache_hours)
+@disk_cache(
+    ttl_hours=settings.news_cache_hours,
+    version=2,
+    should_cache=lambda result: not result.get("feed_errors"),
+)
 def get_company_news(symbol: str, company_name: str, lookback_days: int = 30) -> dict:
     """Recent headlines from both feeds. One failing feed is tolerated; both failing is an error."""
     symbol = normalize_symbol(symbol)

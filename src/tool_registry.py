@@ -1,86 +1,227 @@
-"""Registry of approved tools. Every call is timed, logged, and returned as a ToolCallResult."""
+"""Approved-tool and subagent registries.
+
+Tools are only callable through a ``ToolSession`` scoped to the tools the plan selected for
+a step, so tool use is conditional and every call is logged (name, params, status,
+duration, summary, error, timestamp).
+"""
 
 from __future__ import annotations
 
 import time
-from typing import Callable
+from dataclasses import dataclass
+from typing import Any, Callable
 
-import pandas as pd
+from .models import (
+    SUBAGENT_EARNINGS,
+    SUBAGENT_MARKET,
+    SUBAGENT_NEWS,
+    AgentState,
+    Status,
+    ToolCallResult,
+)
 
-from . import data_tools
-from .models import ToolCallResult
-from .utils import utc_now_iso
+TOOL_COMPANY_PROFILE = "get_company_profile"
+TOOL_PRICE_HISTORY = "get_price_history"
+TOOL_BENCHMARK_HISTORY = "get_benchmark_history"
+TOOL_FINANCIALS = "get_financial_statements"
+TOOL_NEWS = "get_company_news"
+TOOL_SEC_FILINGS = "get_sec_filings"
+TOOL_MACRO = "get_macro_series"
+TOOL_MEMORY_RETRIEVAL = "memory_retrieval"
+TOOL_MEMORY_STORAGE = "memory_storage"
+
+APPROVED_TOOLS = (
+    TOOL_COMPANY_PROFILE,
+    TOOL_PRICE_HISTORY,
+    TOOL_BENCHMARK_HISTORY,
+    TOOL_FINANCIALS,
+    TOOL_NEWS,
+    TOOL_SEC_FILINGS,
+    TOOL_MACRO,
+    TOOL_MEMORY_RETRIEVAL,
+    TOOL_MEMORY_STORAGE,
+)
 
 
-def summarize_output(data) -> str:
-    """Short, log-friendly description of a tool's return value."""
-    if isinstance(data, pd.DataFrame):
-        span = ""
-        if isinstance(data.index, pd.DatetimeIndex) and len(data):
-            span = f", {data.index[0].date()} to {data.index[-1].date()}"
-        return f"{len(data)} rows x {data.shape[1]} columns{span}"
-    if isinstance(data, dict) and "articles" in data:
-        return f"{len(data['articles'])} articles from feeds {data.get('feed_counts')}"
+def summarize_output(data: Any) -> str:
+    """Short, log-safe description of a tool payload (never the payload itself)."""
+    if data is None:
+        return "no data"
+    shape = getattr(data, "shape", None)
+    if shape is not None:  # DataFrame / ndarray without importing pandas
+        return f"{type(data).__name__} shape={tuple(shape)}"
     if isinstance(data, dict):
-        return "fields: " + ", ".join(list(data)[:8])
-    if isinstance(data, (list, tuple)):
+        return f"dict with {len(data)} keys"
+    if isinstance(data, (list, tuple, set)):
         return f"{len(data)} records"
-    return type(data).__name__
+    return f"{type(data).__name__}: {str(data)[:80]}"
 
 
-def data_retrieved_at(data) -> str:
-    """When the payload was fetched from its provider (earlier than now for a cached result)."""
-    metadata = data if isinstance(data, dict) else getattr(data, "attrs", {})
-    return metadata.get("retrieved_at") or utc_now_iso()
+def _is_empty(data: Any) -> bool:
+    if data is None:
+        return True
+    empty = getattr(data, "empty", None)
+    if isinstance(empty, bool):
+        return empty
+    try:
+        return len(data) == 0
+    except TypeError:
+        return False
+
+
+@dataclass
+class ToolSpec:
+    name: str
+    fn: Callable[..., Any]
+    description: str
+    critical: bool = False
 
 
 class ToolRegistry:
-    def __init__(self):
-        self._tools: dict[str, Callable] = {}
-        self.log: list[ToolCallResult] = []
+    """Whitelist of callable tools. Registering an unapproved tool name is an error."""
 
-    def register(self, name: str, fn: Callable) -> None:
-        self._tools[name] = fn
+    def __init__(self) -> None:
+        self._tools: dict[str, ToolSpec] = {}
 
-    def call(self, name: str, **arguments) -> ToolCallResult:
-        """Run an approved tool. Failures are captured in the result instead of raised,
-        so one broken data source cannot terminate the whole research run."""
-        if name not in self._tools:
-            raise KeyError(f"Tool {name!r} is not registered. Approved tools: {sorted(self._tools)}")
-        started = time.perf_counter()
+    def register(self, name: str, fn: Callable[..., Any], description: str = "", critical: bool = False) -> None:
+        if name not in APPROVED_TOOLS:
+            raise ValueError(f"Tool {name!r} is not in the approved tool list")
+        self._tools[name] = ToolSpec(name, fn, description, critical)
+
+    def has(self, name: str) -> bool:
+        return name in self._tools
+
+    def names(self) -> list[str]:
+        return list(self._tools)
+
+    def describe(self) -> list[dict[str, Any]]:
+        return [{"name": t.name, "description": t.description, "critical": t.critical} for t in self._tools.values()]
+
+    def session(self, caller: str, allowed: list[str], state: AgentState) -> "ToolSession":
+        return ToolSession(self, caller, allowed, state)
+
+    def execute(self, name: str, caller: str, params: dict[str, Any]) -> ToolCallResult:
+        """Run a tool and return a ToolCallResult; exceptions become failed results."""
+        start = time.perf_counter()
+        spec = self._tools.get(name)
+        if spec is None:
+            return ToolCallResult(name, params, Status.FAILED, 0.0, error="tool not registered", caller=caller)
         try:
-            data = self._tools[name](**arguments)
-            result = ToolCallResult(
-                tool_name=name,
-                arguments=arguments,
-                status="success",
-                duration_seconds=round(time.perf_counter() - started, 3),
-                output_summary=summarize_output(data),
-                retrieved_at=data_retrieved_at(data),
-                data=data,
-            )
+            data = spec.fn(**params)
         except Exception as exc:
-            result = ToolCallResult(
-                tool_name=name,
-                arguments=arguments,
-                status="error",
-                duration_seconds=round(time.perf_counter() - started, 3),
-                error=f"{type(exc).__name__}: {exc}",
+            elapsed = (time.perf_counter() - start) * 1000
+            return ToolCallResult(
+                name, params, Status.FAILED, round(elapsed, 2), error=f"{type(exc).__name__}: {exc}", caller=caller
             )
-        self.log.append(result)
+        elapsed = (time.perf_counter() - start) * 1000
+        return ToolCallResult(
+            name, params, Status.SUCCESS, round(elapsed, 2), output_summary=summarize_output(data), caller=caller, data=data
+        )
+
+
+class ToolSession:
+    """Tool access for one step: enforces the plan's tool selection and logs every call to state."""
+
+    def __init__(self, registry: ToolRegistry, caller: str, allowed: list[str], state: AgentState):
+        self._registry = registry
+        self.caller = caller
+        self.allowed = set(allowed)
+        self._state = state
+
+    def call(self, tool_name: str, **params: Any) -> ToolCallResult:
+        if tool_name not in self.allowed:
+            result = ToolCallResult(
+                tool_name, params, Status.FAILED, 0.0, error="tool not selected by the plan for this step", caller=self.caller
+            )
+        else:
+            result = self._registry.execute(tool_name, self.caller, params)
+        self._state.tool_call_log.append(result.to_log())
+        if not result.ok:
+            self._state.warn(self.caller, f"Tool {tool_name} failed: {result.error}", tool=tool_name)
+        elif _is_empty(result.data):
+            self._state.warn(self.caller, f"Tool {tool_name} returned no data", tool=tool_name)
         return result
 
-    def log_frame(self) -> pd.DataFrame:
-        """The tool-call log as a DataFrame for display."""
-        return pd.DataFrame([entry.model_dump() for entry in self.log])
+
+# Signature every subagent implements: fn(state, tools: ToolSession, step) -> SubagentResult | dict
+SubagentFn = Callable[[AgentState, ToolSession, Any], Any]
 
 
-def build_tool_registry() -> ToolRegistry:
-    """Registry preloaded with the data tools."""
-    registry = ToolRegistry()
-    for tool in (
-        data_tools.resolve_symbol, data_tools.get_company_profile, data_tools.get_price_history, data_tools.get_benchmark_history,
-        data_tools.get_financial_statements, data_tools.get_company_news, data_tools.get_macro_series, data_tools.get_sec_filings,
-    ):
-        registry.register(tool.__name__, tool)
+@dataclass
+class SubagentSpec:
+    name: str
+    description: str
+    required_tools: tuple[str, ...]
+    optional_tools: tuple[str, ...] = ()
+    keywords: tuple[str, ...] = ()  # routing hints for the rule-based planner
+    fn: SubagentFn | None = None
+
+    def allowed_tools(self) -> tuple[str, ...]:
+        return self.required_tools + self.optional_tools
+
+
+class SubagentRegistry:
+    def __init__(self) -> None:
+        self._agents: dict[str, SubagentSpec] = {}
+
+    def register(self, spec: SubagentSpec) -> None:
+        self._agents[spec.name] = spec
+
+    def attach(self, name: str, fn: SubagentFn) -> None:
+        """Bind the implementation (provided by Engineer 2) to an existing spec."""
+        self._agents[name].fn = fn
+
+    def get(self, name: str) -> SubagentSpec:
+        return self._agents[name]
+
+    def has(self, name: str) -> bool:
+        return name in self._agents
+
+    def names(self) -> list[str]:
+        return list(self._agents)
+
+    def specs(self) -> list[SubagentSpec]:
+        return list(self._agents.values())
+
+
+def default_subagent_registry() -> SubagentRegistry:
+    """Market, Earnings and News specs with their tool allowances and routing keywords."""
+    registry = SubagentRegistry()
+    registry.register(
+        SubagentSpec(
+            name=SUBAGENT_MARKET,
+            description="Stock and benchmark price performance, returns, rolling volatility, trends; optional macro context.",
+            required_tools=(TOOL_PRICE_HISTORY, TOOL_BENCHMARK_HISTORY),
+            optional_tools=(TOOL_MACRO,),
+            keywords=(
+                "price", "stock performance", "share price", "share-price", "return", "volatility", "benchmark",
+                "price trend", "rally", "drawdown", "momentum", "outperform", "underperform", "chart", "movement",
+                "technical", "s&p", "stock move", "52-week",
+            ),
+        )
+    )
+    registry.register(
+        SubagentSpec(
+            name=SUBAGENT_EARNINGS,
+            description="Income statement, balance sheet and cash-flow analysis: revenue, profit, margins, financial risks.",
+            required_tools=(TOOL_FINANCIALS,),
+            optional_tools=(TOOL_SEC_FILINGS,),
+            keywords=(
+                "earnings", "revenue", "profit", "margin", "cash flow", "balance sheet", "income statement",
+                "financial", "eps", "net income", "debt", "quarterly", "annual", "fundamental", "10-k", "10-q",
+                "sales", "balance-sheet", "cash-flow",
+            ),
+        )
+    )
+    registry.register(
+        SubagentSpec(
+            name=SUBAGENT_NEWS,
+            description="Recent company news via the five-stage prompt chain: events, catalysts, risks, source-backed summary.",
+            required_tools=(TOOL_NEWS,),
+            keywords=(
+                "news", "announcement", "headline", "event", "launch", "lawsuit", "acquisition",
+                "catalyst", "sentiment", "product", "press", "development", "regulat", "partnership", "leadership",
+            ),
+        )
+    )
     return registry
