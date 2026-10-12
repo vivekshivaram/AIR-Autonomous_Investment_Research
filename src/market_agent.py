@@ -191,6 +191,8 @@ def run_market_agent(task: SubagentInput, tools: ToolRegistry, run_settings: Set
         macro_findings, macro_limitations = get_macro_context(task.profile, tools, evidence)
         result.findings += macro_findings
         result.limitations += macro_limitations
+        if macro_limitations:
+            result.status = "partial"
 
     result.evidence = evidence.items
     result.limitations += [

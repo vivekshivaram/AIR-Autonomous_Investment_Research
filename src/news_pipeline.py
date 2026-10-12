@@ -87,7 +87,10 @@ def ingest_news(
     if not call.ok:
         raise DataToolError(call.error)
     articles = [
-        NewsArticle(id=f"A{index:03d}", **{k: v for k, v in article.items() if v is not None})
+        NewsArticle(
+            id=f"A{index:03d}",
+            **{"retrieved_at": call.data.get("retrieved_at"), **{k: v for k, v in article.items() if v is not None}},
+        )
         for index, article in enumerate(call.data["articles"], start=1)
     ]
     return articles, call.data.get("feed_errors", {})
@@ -314,6 +317,7 @@ def extract_news_events(
                 time_horizon=article.time_horizon,
                 source=article.publisher,
                 url=article.url,
+                retrieved_at=article.retrieved_at,
             )
         )
     return events

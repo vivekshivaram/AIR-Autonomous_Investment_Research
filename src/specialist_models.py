@@ -42,6 +42,7 @@ class NewsArticle(BaseModel):
     url: str = ""
     published_at: datetime | None = None
     source_feed: str = ""
+    retrieved_at: str | None = None
     duplicate_count: int = 1
     also_reported_by: list[str] = Field(default_factory=list)
     event_type: str | None = None
@@ -66,4 +67,5 @@ class ExtractedNewsEvent(BaseModel):
     time_horizon: str | None = None
     source: str = ""
     url: str = ""
+    retrieved_at: str | None = None
     extraction_method: Literal["llm", "headline_fallback"] = "llm"

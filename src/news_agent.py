@@ -82,7 +82,7 @@ def run_news_agent(
     if summary["method"] == "deterministic_fallback":
         result.warnings.append("The summary used the deterministic event fallback because no valid event citations were returned.")
 
-    evidence = EvidenceBuilder("NEWS", "news headline", retrieved_at=utc_now_iso())
+    evidence = EvidenceBuilder("NEWS", "news headline")
     for event in events:
         evidence_id = evidence.add(
             event.event,
@@ -91,6 +91,7 @@ def run_news_agent(
             source=event.source or "unknown publisher",
             source_url=event.url,
             as_of=event.event_date,
+            retrieved_at=event.retrieved_at or utc_now_iso(),
         )
         if len(result.findings) < 6:
             result.findings.append(

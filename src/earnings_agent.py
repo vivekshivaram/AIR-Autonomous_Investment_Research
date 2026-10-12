@@ -181,6 +181,7 @@ def run_earnings_agent(task: SubagentInput, tools: ToolRegistry) -> SubagentResu
             )
         )
     elif filings_call:
+        result.status = "partial"
         result.limitations.append(f"SEC filing references unavailable ({filings_call.error}).")
 
     growth_text = f"{rev_yoy:+.1%}" if rev_yoy is not None else "n/a"
