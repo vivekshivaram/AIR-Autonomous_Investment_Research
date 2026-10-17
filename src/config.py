@@ -22,6 +22,10 @@ DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_HF_MODEL = "openai/gpt-oss-120b"
 DEFAULT_HF_BASE_URL = "https://router.huggingface.co/v1"
 
+# Google AI Studio exposes Gemini through an OpenAI-compatible endpoint. Override with GEMINI_MODEL.
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
 
 def _env_float(name: str, default: float) -> float:
     try:
@@ -39,9 +43,12 @@ class LLMConfig:
     model: str = DEFAULT_GROQ_MODEL
     timeout_s: float = 60.0
     max_retries: int = 2
+    # Thinking depth for reasoning models ("low", "medium", "high"); None leaves the provider default.
+    reasoning_effort: str | None = None
 
     @classmethod
     def groq_from_env(cls) -> "LLMConfig":
+        """Groq settings from GROQ_* environment variables."""
         return cls(
             api_key=(os.getenv("GROQ_API_KEY") or "").strip() or None,
             base_url=os.getenv("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL),
@@ -52,6 +59,7 @@ class LLMConfig:
 
     @classmethod
     def hf_from_env(cls) -> "LLMConfig":
+        """Hugging Face router settings from HF_* environment variables."""
         return cls(
             api_key=(os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_API_KEY") or "").strip() or None,
             base_url=os.getenv("HF_BASE_URL", DEFAULT_HF_BASE_URL),
@@ -60,8 +68,22 @@ class LLMConfig:
             max_retries=int(_env_float("HF_MAX_RETRIES", 2)),
         )
 
+    @classmethod
+    def gemini_from_env(cls) -> "LLMConfig":
+        """Google AI Studio settings from GEMINI_* environment variables (GOOGLE_API_KEY also works)."""
+        effort = os.getenv("GEMINI_REASONING_EFFORT", "low").strip().lower()
+        return cls(
+            api_key=(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip() or None,
+            base_url=os.getenv("GEMINI_BASE_URL", DEFAULT_GEMINI_BASE_URL),
+            model=os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
+            timeout_s=_env_float("GEMINI_TIMEOUT_S", 120.0),
+            max_retries=int(_env_float("GEMINI_MAX_RETRIES", 4)),
+            reasoning_effort=effort or None,
+        )
+
     @property
     def is_configured(self) -> bool:
+        """True when an API key is present; no network call is made."""
         return bool(self.api_key)
 
 
