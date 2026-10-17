@@ -11,17 +11,23 @@ from .utils import utc_now_iso
 
 
 class SubagentInput(BaseModel):
+    """What a specialist receives: the symbol, the company profile and whether macro context was requested."""
+
     symbol: str
     profile: dict[str, Any] = Field(default_factory=dict)
     include_macro: bool = False
 
 
 class Finding(BaseModel):
+    """One specialist finding and the evidence IDs that support it."""
+
     statement: str
     evidence_ids: list[str] = Field(default_factory=list)
 
 
 class SpecialistResult(BaseModel):
+    """Engineer 2's result model; the adapters convert it to the shared SubagentResult."""
+
     agent: str
     status: Literal["success", "partial", "failed"]
     summary: str = ""
@@ -35,6 +41,8 @@ class SpecialistResult(BaseModel):
 
 
 class NewsArticle(BaseModel):
+    """A headline as it moves through the news chain; classification fields are filled in stage 3."""
+
     id: str
     title: str
     summary: str = ""
@@ -52,6 +60,8 @@ class NewsArticle(BaseModel):
 
 
 class ExtractedNewsEvent(BaseModel):
+    """A structured event extracted from one material headline in stage 4, with its source and extraction method."""
+
     id: str
     article_id: str
     event: str

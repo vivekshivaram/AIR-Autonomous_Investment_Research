@@ -29,6 +29,7 @@ def _stub_tool(name: str):
 
 
 def register_stub_tools(tools: ToolRegistry, only_missing: bool = True) -> list[str]:
+    """Register placeholder data tools (by default only the missing ones) and return their names."""
     registered = []
     for name in _STUB_TOOLS:
         if only_missing and tools.has(name):
@@ -39,6 +40,7 @@ def register_stub_tools(tools: ToolRegistry, only_missing: bool = True) -> list[
 
 
 def make_stub_subagent(agent: str):
+    """A placeholder subagent that makes its planned tool calls and says that no analysis was done."""
     def run(state: AgentState, tools: ToolSession, step: ResearchStep) -> dict[str, Any]:
         calls = [tools.call(tool, symbol=state.symbol) for tool in step.tools]
         ok = sum(c.ok for c in calls)
@@ -57,6 +59,7 @@ def make_stub_subagent(agent: str):
 
 
 def register_stub_subagents(subagents: SubagentRegistry, only_missing: bool = True) -> list[str]:
+    """Attach placeholder implementations to subagents that have none and return their names."""
     attached = []
     for name in (SUBAGENT_MARKET, SUBAGENT_EARNINGS, SUBAGENT_NEWS):
         if subagents.has(name) and not (only_missing and subagents.get(name).fn is not None):
