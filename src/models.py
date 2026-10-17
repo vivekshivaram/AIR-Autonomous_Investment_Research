@@ -308,6 +308,9 @@ class AgentState:
     evaluation_history: list[dict[str, Any]] = field(default_factory=list)
     final_report: dict[str, Any] | None = None
     memories_used: list[dict[str, Any]] = field(default_factory=list)
+    # Written by the report pipeline: the run's self-reflection (with stored lessons) and output file paths.
+    reflection: dict[str, Any] | None = None
+    output_files: dict[str, str] = field(default_factory=dict)
     warnings: list[Issue] = field(default_factory=list)
     started_at: str = field(default_factory=utc_now_iso)
 

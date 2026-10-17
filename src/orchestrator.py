@@ -18,7 +18,7 @@ from .models import (
     utc_now_iso,
 )
 from .planner import Planner
-from .tool_registry import TOOL_COMPANY_PROFILE, SubagentRegistry, ToolRegistry
+from .tool_registry import TOOL_COMPANY_PROFILE, TOOL_MEMORY_RETRIEVAL, SubagentRegistry, ToolRegistry
 
 MemoryRetriever = Callable[[str, str], Iterable[Any]]
 ReportPipeline = Callable[[AgentState], "AgentState | None"]
@@ -88,12 +88,29 @@ class Orchestrator:
         if self.memory_retriever is None:
             return []
         try:
-            items = [MemoryItem.from_raw(m) for m in self.memory_retriever(state.symbol, state.research_question)]
+            if self.tools.has(TOOL_MEMORY_RETRIEVAL):
+                raw = self._call_memory_tool(state)
+            else:
+                raw = self.memory_retriever(state.symbol, state.research_question)
+            items = [MemoryItem.from_raw(m) for m in raw]
         except Exception as exc:  # memory is optional guidance; planning proceeds without it
             state.warn("orchestrator", f"Memory retrieval failed: {exc}")
             return []
         state.memories_used = [m.to_dict() for m in items]
         return items
+
+    def _call_memory_tool(self, state: AgentState) -> list[Any]:
+        """Retrieve lessons through the tool registry, so the call is logged like any other tool call.
+
+        An empty memory is normal on a first run, so unlike ``ToolSession.call`` this does not warn
+        when the tool returns no lessons.
+        """
+        params = {"symbol": state.symbol, "question": state.research_question}
+        result = self.tools.execute(TOOL_MEMORY_RETRIEVAL, "planner", params)
+        state.tool_call_log.append(result.to_log())
+        if not result.ok:
+            raise RuntimeError(result.error)
+        return list(result.data or [])
 
     def _fetch_profile(self, state: AgentState) -> None:
         """Company profile is shared context (e.g. company name for news) and non-critical."""

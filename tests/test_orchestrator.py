@@ -168,3 +168,23 @@ def test_memory_retrieval_failure_is_non_fatal_and_memories_recorded():
     orch, _, _ = build(memory_retriever=lambda s, q: [{"memory_id": "M1", "lesson": "be careful"}])
     state = orch.run("AAPL", "price performance")
     assert state.memories_used[0]["memory_id"] == "M1"
+
+
+def test_memory_retrieval_is_logged_as_a_tool_call_when_registered():
+    retrieved = [{"memory_id": "MEM-0001", "lesson": "include news", "hint": {}}]
+    orch, _, tools = build(memory_retriever=lambda s, q: retrieved)
+    tools.register("memory_retrieval", lambda symbol, question: retrieved, "Retrieve lessons")
+
+    state = orch.run("AAPL", "Analyze one-year price performance")
+
+    first_call = state.tool_call_log[0]
+    assert (first_call["caller"], first_call["tool_name"], first_call["status"]) == ("planner", "memory_retrieval", "success")
+    assert first_call["parameters"] == {"symbol": "AAPL", "question": "Analyze one-year price performance"}
+    assert state.memories_used[0]["memory_id"] == "MEM-0001"
+
+
+def test_empty_memory_is_not_a_warning():
+    orch, _, tools = build(memory_retriever=lambda s, q: [])
+    tools.register("memory_retrieval", lambda symbol, question: [], "Retrieve lessons")
+    state = orch.plan("AAPL", "Analyze one-year price performance")
+    assert not [w for w in state.warnings if "memory" in w.message.lower()]
