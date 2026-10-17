@@ -20,6 +20,7 @@ STATUS_COLORS = {
 
 
 def routing_table(routing: Sequence[RoutingDecision]) -> pd.DataFrame:
+    """Routing decisions as a table: selected or skipped, reason, confidence and execution status."""
     return pd.DataFrame(
         [
             {
@@ -36,6 +37,7 @@ def routing_table(routing: Sequence[RoutingDecision]) -> pd.DataFrame:
 
 
 def plan_table(plan: ResearchPlan) -> pd.DataFrame:
+    """Plan steps as a table: subagent, description, dependencies, tools, completion criterion and status."""
     return pd.DataFrame(
         [
             {
@@ -53,11 +55,13 @@ def plan_table(plan: ResearchPlan) -> pd.DataFrame:
 
 
 def tool_log_table(state: AgentState) -> pd.DataFrame:
+    """The tool-call log as a table; payloads are never logged."""
     cols = ["caller", "tool_name", "status", "duration_ms", "output_summary", "error", "retrieved_at"]
     return pd.DataFrame(state.tool_call_log, columns=cols)
 
 
 def execution_table(state: AgentState) -> pd.DataFrame:
+    """One row per executed step with status, duration and the number of tool calls."""
     return pd.DataFrame(state.execution_log)
 
 

@@ -11,6 +11,8 @@ from .utils import extract_json
 
 
 class LocalQwenClient:
+    """Optional local Transformers model with the same chat interface as the API clients; it loads on first use."""
+
     provider = "local-transformers"
     available = True
 
@@ -22,6 +24,7 @@ class LocalQwenClient:
 
     @property
     def model(self) -> str:
+        """The checkpoint name."""
         return self.model_id
 
     def _load(self) -> None:
@@ -51,6 +54,7 @@ class LocalQwenClient:
         json_schema: dict[str, Any] | None = None,
         schema_name: str = "response",
     ) -> str:
+        """Generate a reply with greedy decoding; with ``json_schema`` the schema is appended to the prompt."""
         self._load()
         prompt_messages = [dict(message) for message in messages]
         if json_schema is not None:
@@ -81,6 +85,7 @@ class LocalQwenClient:
         temperature: float | None = 0.0,
         max_tokens: int | None = None,
     ) -> dict[str, Any]:
+        """Generate a reply and parse the first JSON object in it (LLMError if there is none)."""
         text = self.chat(
             messages,
             temperature=temperature,

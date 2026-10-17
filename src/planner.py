@@ -78,6 +78,8 @@ class PlanValidationError(ValueError):
 
 
 class SupportsJSON(Protocol):
+    """What the planner needs from an LLM client: an ``available`` flag and schema-constrained ``chat_json``."""
+
     available: bool
 
     def chat_json(self, messages: list[dict[str, str]], json_schema: dict[str, Any], **kwargs: Any) -> dict[str, Any]: ...
@@ -85,6 +87,8 @@ class SupportsJSON(Protocol):
 
 @dataclass
 class PlanningResult:
+    """The plan, a routing decision for every subagent (selected or skipped) and any issues raised while planning."""
+
     plan: ResearchPlan
     routing: list[RoutingDecision]
     issues: list[Issue] = field(default_factory=list)
@@ -103,6 +107,7 @@ class QuestionProfile:
 
 
 def normalize_question(question: str, max_chars: int) -> str:
+    """Collapse whitespace and enforce the length limit; an empty or overlong question raises ValueError."""
     cleaned = " ".join((question or "").split())
     if not cleaned:
         raise ValueError("Research question must not be empty")
@@ -210,6 +215,11 @@ class Planner:
     # ---- public API -------------------------------------------------------------
 
     def create_plan(self, symbol: str, question: str, memories: Iterable[Any] = ()) -> PlanningResult:
+        """Plan one request and record a routing decision for every subagent.
+
+        The LLM plans first and keyword routing takes over on any failure; lesson hints are then applied
+        and the result is validated. Raises PlanValidationError when the final plan breaks a structural rule.
+        """
         symbol = validate_symbol(symbol)
         question = normalize_question(question, self.settings.max_question_chars)
         lessons = self._select_lessons(memories)

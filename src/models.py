@@ -21,6 +21,7 @@ _SYMBOL_RE = re.compile(r"^[A-Z]{1,5}([.-][A-Z]{1,2})?$")
 
 
 def utc_now_iso() -> str:
+    """Current UTC time as an ISO-8601 string with seconds precision."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
@@ -59,6 +60,8 @@ class Issue:
 
 @dataclass
 class ResearchStep:
+    """One planned task: the subagent that runs it, the tools it may call, its dependencies and completion criterion."""
+
     step_id: str
     description: str
     subagent: str
@@ -76,6 +79,8 @@ class ResearchStep:
 
 @dataclass
 class ResearchPlan:
+    """The validated plan for one request: ordered steps plus scope, intent, planner mode and the lessons applied."""
+
     symbol: str
     question: str
     intent: str
@@ -89,6 +94,7 @@ class ResearchPlan:
 
     @property
     def selected_subagents(self) -> list[str]:
+        """Subagents in plan order, each listed once."""
         seen: list[str] = []
         for step in self.steps:
             if step.subagent not in seen:
@@ -96,6 +102,7 @@ class ResearchPlan:
         return seen
 
     def get_step(self, step_id: str) -> ResearchStep:
+        """The step with this id (KeyError if there is none)."""
         for step in self.steps:
             if step.step_id == step_id:
                 return step
@@ -125,6 +132,8 @@ class RoutingDecision:
 
 @dataclass
 class ToolCallResult:
+    """Outcome of one tool call. ``data`` carries the payload to the caller; ``to_log`` leaves it out of the log."""
+
     tool_name: str
     parameters: dict[str, Any]
     status: str  # Status.SUCCESS | Status.FAILED
@@ -138,9 +147,11 @@ class ToolCallResult:
 
     @property
     def ok(self) -> bool:
+        """True when the call succeeded."""
         return self.status == Status.SUCCESS
 
     def to_log(self) -> dict[str, Any]:
+        """Log entry for ``state.tool_call_log``: everything except the raw payload."""
         entry = asdict(self)
         entry.pop("data", None)
         return entry
@@ -148,6 +159,11 @@ class ToolCallResult:
 
 @dataclass
 class EvidenceItem:
+    """One citable fact with its source, unit, as-of date and retrieval time.
+
+    ``id`` and ``evidence_id`` are kept in sync because Engineers 1 and 2 used different names.
+    """
+
     claim: str
     source: str
     source_agent: str = ""
@@ -176,6 +192,7 @@ class EvidenceItem:
 
     @classmethod
     def from_raw(cls, raw: Any, source_agent: str) -> "EvidenceItem":
+        """Normalise evidence given as text, a dict or a Pydantic model; SchemaError when it has no claim."""
         if not isinstance(raw, (str, dict)):
             model_dump = getattr(raw, "model_dump", None)
             if callable(model_dump):
@@ -276,6 +293,7 @@ class MemoryItem:
 
     @classmethod
     def from_raw(cls, raw: "MemoryItem | dict[str, Any] | str") -> "MemoryItem":
+        """Accept a MemoryItem, a dict with at least ``lesson``, or a bare lesson string."""
         if isinstance(raw, MemoryItem):
             return raw
         if isinstance(raw, str):
@@ -321,12 +339,15 @@ class AgentState:
     }
 
     def warn(self, source: str, message: str, severity: str = "warning", **details: Any) -> None:
+        """Record a warning or error raised anywhere in the workflow."""
         self.warnings.append(Issue(source=source, message=message, severity=severity, details=details))
 
     def set_result(self, result: SubagentResult) -> None:
+        """Store a validated subagent result in its field (market_result, earnings_result or news_result)."""
         setattr(self, self.RESULT_FIELDS[result.agent], result.to_dict())
 
     def get_result(self, agent: str) -> dict[str, Any] | None:
+        """The stored result for one subagent, or None if it did not run."""
         return getattr(self, self.RESULT_FIELDS[agent])
 
     def to_dict(self) -> dict[str, Any]:

@@ -46,6 +46,7 @@ def cagr(first: float, last: float, years: float) -> float | None:
 
 
 def debt_to_equity(total_debt, equity) -> float | None:
+    """Total debt divided by stockholders' equity; None when either is missing or equity is not positive."""
     debt, equity = safe_float(total_debt), safe_float(equity)
     return debt / equity if debt is not None and equity and equity > 0 else None
 

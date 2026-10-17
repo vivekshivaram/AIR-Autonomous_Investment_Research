@@ -17,10 +17,12 @@ from .config import settings
 
 
 def utc_now() -> datetime:
+    """Current time in UTC."""
     return datetime.now(timezone.utc)
 
 
 def utc_now_iso() -> str:
+    """Current UTC time as an ISO-8601 string with seconds precision."""
     return utc_now().isoformat(timespec="seconds")
 
 
