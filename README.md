@@ -4,9 +4,9 @@ A Python-based autonomous investment research system that plans research tasks, 
 
 ## Current Integration Status
 
-The runnable path integrates Engineer 1's Planner/Orchestrator with Engineer 2's data connectors, market and earnings analysis, and five-stage news chain. Groq and Hugging Face API clients are preferred; local Qwen is opt-in. Engineer 3's report generator, evaluator/optimizer, reflection, and memory modules are not present yet, so `build_runtime()` reports those handoffs as `missing` and preserves `state.aggregated` for integration.
+All three engineers' work is integrated. Engineer 1's Planner and Orchestrator route each request to the specialists it needs; Engineer 2's data connectors, market and earnings analysis and five-stage news chain produce cited evidence; Engineer 3's report pipeline writes a cited report, runs the Evaluator-Optimizer loop, reflects on the run and stores lessons in SQLite memory that later runs read before planning. `build_runtime()` reports every component as `real`.
 
-The notebook demonstrates planning, conditional routing, scoped tool calls, real specialist outputs, charts, and every news-chain stage. See [Plans/integration_plan.md](Plans/integration_plan.md) for the merge scope and verification record.
+The default LLM is Gemini 3.8 Flash through Google AI Studio (`LLM_PROVIDER=gemini`); Groq, Hugging Face and a local Qwen model remain selectable. The notebook demonstrates every requirement on live data. See [Plans/final_completion_plan.md](Plans/final_completion_plan.md) for the completion plan and [Plans/integration_plan.md](Plans/integration_plan.md) for the Engineer 1 and 2 merge.
 
 ## Project Objectives
 
@@ -79,60 +79,36 @@ flowchart TD
 ## Repository Structure
 
 ```text
-investment-research-agent/
-├── investment_research_agent.ipynb
+AIR-Autonomous_Investment_Research/
+├── investment_research_agent.ipynb   end-to-end demonstration (run top to bottom)
 ├── README.md
 ├── architecture.md
-├── prd_and_engineer_plans.md
 ├── requirements.txt
+├── requirements-local-llm.txt        optional, for LLM_PROVIDER=local
 ├── .env.example
-├── .gitignore
-├── agent_memory.db
+├── Plans/
+│   ├── prd_and_engineer_plans.md
+│   ├── engineer_1_plan.md, engineer_2_plan.md, engineer_3_plan.md
+│   ├── integration_plan.md
+│   └── final_completion_plan.md
 ├── src/
-│   ├── __init__.py
-│   ├── config.py
-│   ├── models.py
-│   ├── planner.py
-│   ├── orchestrator.py
-│   ├── tool_registry.py
-│   ├── market_agent.py
-│   ├── earnings_agent.py
-│   ├── news_agent.py
-│   ├── news_pipeline.py
-│   ├── data_tools.py
-│   ├── macro_context.py
-│   ├── evidence.py
-│   ├── report_generator.py
-│   ├── evaluator.py
-│   ├── optimizer.py
-│   ├── reflection.py
-│   ├── memory.py
-│   ├── visualizations.py
-│   └── utils.py
+│   ├── config.py, models.py, utils.py
+│   ├── llm_client.py, llm_cache.py, local_llm.py
+│   ├── planner.py, orchestrator.py, tool_registry.py, bootstrap.py, stubs.py
+│   ├── data_tools.py, macro_context.py, evidence.py
+│   ├── market_agent.py, earnings_agent.py, news_agent.py, news_pipeline.py
+│   ├── specialist_models.py, specialist_adapters.py
+│   ├── report_models.py, report_evidence.py, report_generator.py
+│   ├── evaluator.py, optimizer.py, reflection.py, memory.py, run_outputs.py
+│   └── visualizations.py, orchestration_viz.py, evaluation_viz.py, chart_notes.py
 ├── prompts/
 │   ├── planner.txt
-│   ├── news_classifier.txt
-│   ├── news_extractor.txt
-│   ├── news_summarizer.txt
-│   ├── report_generator.txt
-│   ├── evaluator.txt
-│   └── optimizer.txt
-├── tests/
-│   ├── test_planner.py
-│   ├── test_routing.py
-│   ├── test_tools.py
-│   ├── test_market_agent.py
-│   ├── test_earnings_agent.py
-│   ├── test_news_pipeline.py
-│   ├── test_evaluator.py
-│   └── test_memory.py
-├── data/
-│   ├── cache/
-│   └── samples/
-└── outputs/
-    ├── reports/
-    ├── charts/
-    └── logs/
+│   ├── news_classifier.txt, news_extractor.txt, news_summarizer.txt
+│   └── report_generator.txt, evaluator.txt, optimizer.txt
+├── tests/                            158 offline tests (pytest)
+├── data/cache/                       created at run time (gitignored)
+├── outputs/                          reports, charts, run logs (gitignored)
+└── agent_memory.db                   SQLite memory, created at run time (gitignored)
 ```
 
 ## Project Modules
@@ -300,17 +276,15 @@ This module is invoked only when the Planner or Market Subagent determines that 
 
 ### `src/evidence.py`
 
-Responsible for:
+`EvidenceBuilder` gives each specialist's facts stable IDs (MKT-1, ERN-1, NEWS-1) and keeps their source, unit, as-of date and retrieval time, so every finding can cite the facts behind it. `orchestrator.aggregate_results` merges the evidence of all specialists, removes duplicates and keeps finding citations resolvable; the report pipeline then separates facts from interpretations statement by statement.
 
-- Normalizing evidence from all specialists
-- Removing duplicate evidence
-- Connecting claims to their sources
-- Preserving source and retrieval dates
-- Separating observed facts from interpretations
+### `src/report_models.py` and `src/report_evidence.py`
+
+The report schemas (`ResearchReport`, `ReportSection`, `ReportStatement`, `EvaluationResult`, `ReportIssue`, `RunReflection`, `Lesson`) and the evidence pack the report pipeline works from. Every report statement is a `fact` (must cite evidence), an `interpretation` or a `disclosure` about the analysis itself, which keeps observed facts apart from judgements. The pack numbers the specialists' risks (R1...), catalysts (C1...) and limitations (L1...), adds company-profile facts as citable evidence (PRO-1...) and maps news event tags to their evidence IDs.
 
 ### `src/report_generator.py`
 
-Creates the initial structured research report:
+The Engineer 3 entry point, `run_report_pipeline(state)` (bound to the runtime by `make_report_pipeline`). It writes the first draft, runs the Evaluator-Optimizer loop, reflects, stores lessons and saves the output files. The report has eleven sections:
 
 1. Executive summary
 2. Company overview
@@ -324,52 +298,45 @@ Creates the initial structured research report:
 10. Confidence and limitations
 11. Sources
 
+The LLM writes a brief first draft under a JSON schema and may cite only IDs from the evidence pack; invalid citations are removed. The company overview, confidence level and sources table are built in code. Without an LLM, a template turns the specialists' findings into statements word for word.
+
 ### `src/evaluator.py`
 
-Evaluates the report using a structured rubric:
+Scores a report on eight weighted criteria (0 to 100 each):
 
-- Evidence grounding
-- Completeness
-- Numeric consistency
-- Source recency
-- Risk coverage
-- Catalyst coverage
-- Clarity
-- Uncertainty disclosure
+| Criterion | Weight | Check |
+|---|---|---|
+| Evidence grounding | 20 | Facts cite valid evidence IDs; memory IDs never count |
+| Completeness | 15 | Sections filled, findings reflected, gaps explained, price moves given their drivers |
+| Numeric consistency | 15 | Every number matches its cited evidence after unit and rounding normalisation |
+| Source recency | 10 | Cited evidence is fresh and every data section states its period |
+| Risk coverage | 10 | Specialist risks covered |
+| Catalyst coverage | 10 | Specialist catalysts covered, or the report says they were not assessed |
+| Clarity | 10 | LLM judgement, with text heuristics as the fallback |
+| Uncertainty disclosure | 10 | Confidence with reasons, every limitation disclosed, no certain or advisory wording |
 
-The evaluator returns criterion-level scores, issues, corrective actions, and an accept-or-refine decision.
+A report is accepted when the weighted score reaches the quality threshold (80) and no criterion is below 60, so a report rated wordy or jargon-heavy is refined even when its overall score is high. Clarity takes the lower of the LLM's judgement and rule-based readability checks (unformatted figures, double negatives, long or repeated sentences). Every issue names its section and a corrective action.
 
 ### `src/optimizer.py`
 
-Uses evaluator feedback to refine only the weak report sections. It enforces:
-
-- Quality threshold
-- Maximum number of refinement cycles
-- Minimum meaningful score improvement
-- Preservation of verified facts and sources
+Rewrites only the sections with issues. Statements that passed every check are locked: the LLM is asked to keep them, and one is put back if a rewrite drops what it cites. The loop stops when the report is accepted, after the maximum number of refinement cycles (2), or when a cycle gains less than two points; the best-scoring version becomes the final report. Without an LLM, rule-based fixes apply the corrective actions directly.
 
 ### `src/reflection.py`
 
-Creates a structured reflection after each run:
-
-- Successful steps
-- Failed or skipped steps
-- Evidence gaps
-- Tool problems
-- Quality issues
-- Improvements made
-- Reusable lessons
+Builds a structured reflection after each run: successful, failed and skipped steps, tool problems, evidence gaps, issues fixed and still open, the score change, and reusable lessons. Lessons come from explicit rules and carry machine-readable hints: `require_subagents` and `extra_criteria` for the planner, `report_guidance` for the writer.
 
 ### `src/memory.py`
 
-Implements persistent SQLite memory:
+Persistent SQLite memory with three tables: `lessons`, `runs` and `lesson_usage`.
 
-- Initialize database
-- Save compact lessons
-- Retrieve symbol-specific lessons
-- Retrieve general workflow lessons
-- Record whether a memory was used
-- Avoid treating memory as current market evidence
+- `retrieve_lessons(symbol, question)` returns the most relevant lessons for planning, ranked by symbol, topic overlap and recency. A lesson that adds a specialist is returned only for questions on the same topic.
+- `store_lesson(...)` merges repeated lessons and keeps at most 20 per symbol.
+- `record_run(...)` records which lessons each run retrieved and applied.
+- Memory is guidance, never evidence: lesson IDs cannot be cited.
+
+### `src/run_outputs.py`, `src/evaluation_viz.py` and `src/chart_notes.py`
+
+Output files under `outputs/`, the evaluation and workflow charts, and a short interpretation written from the data behind every chart in the notebook.
 
 ### `src/visualizations.py`
 
@@ -378,15 +345,11 @@ Creates the required charts:
 - Stock and benchmark performance
 - Daily return distribution
 - Rolling volatility
-- Revenue and net-income trends
+- Revenue, net income and free cash flow trends, and margins
 - News processing funnel
 - News category and impact distribution
-- Routing distribution
-- Plan execution status
-- Evaluation before and after optimization
-- Quality score across repeated runs
 
-Every visualization should include a title, labels, units, legend where needed, and a short written interpretation.
+`orchestration_viz.py` adds the plan graph, routing matrix, execution timeline and tool-call chart; `evaluation_viz.py` adds evaluation before and after optimization, the score by refinement cycle, quality across repeated runs and the agent workflow diagram. Every chart has a title, axis labels with units and a legend where needed, and the notebook shows a short interpretation under each one.
 
 ### `src/utils.py`
 
@@ -440,7 +403,11 @@ cp .env.example .env
 
 Do not commit `.env` or API keys to source control.
 
-Leave `LLM_PROVIDER` unset to prefer configured Groq, then Hugging Face. Set it to `groq` or `huggingface` to select one explicitly. The local model is selected only with `LLM_PROVIDER=local`; install `requirements-local-llm.txt` and a PyTorch build suitable for the machine first. For Blackwell GPUs, use a CUDA 12.8-compatible PyTorch build and avoid later installs that replace it.
+The project runs on Gemini 3.8 Flash through Google AI Studio's OpenAI-compatible endpoint. Set `LLM_PROVIDER=gemini` and `GEMINI_API_KEY` (from aistudio.google.com) in `.env`; `GEMINI_REASONING_EFFORT` (low, medium or high) sets the thinking depth. Gemini 3 models accept no temperature, so the client never sends one, and LLM replies are cached on disk for `LLM_CACHE_HOURS` (default 24, 0 disables) so a re-run repeats the same text.
+
+Leave `LLM_PROVIDER` unset to prefer configured Groq, then Gemini, then Hugging Face. Set it to `gemini`, `groq` or `huggingface` to select one explicitly. The local model is selected only with `LLM_PROVIDER=local`; install `requirements-local-llm.txt` and a PyTorch build suitable for the machine first. For Blackwell GPUs, use a CUDA 12.8-compatible PyTorch build and avoid later installs that replace it.
+
+Without any configured LLM the agent still runs: the planner falls back to keyword routing, the news chain to its deterministic fallbacks, and the report writer to its template.
 
 ## Running the Project
 
@@ -483,57 +450,61 @@ To demonstrate routing, also run narrower questions:
 "Analyze the latest earnings announcement and resulting share-price movement."
 ```
 
-## Current Notebook Sections
+## Notebook Sections
 
-The notebook currently demonstrates:
-
-1. Runtime integration status
-2. Planning and task routing
-3. Conditional tool permissions and execution logs
-4. Partial-failure behavior
-5. Real market and earnings analysis with chart-ready data
-6. News ingest, preprocess, classify, extract, and summarize outputs
-7. Evidence aggregation and the Engineer 3 handoff
-
-Report generation, evaluation/optimization, reflection, and persistent learning remain pending Engineer 3 integration.
+0. Overview, runtime status and the architecture diagram
+1. Planning
+2. Routing
+3. Dynamic tool use and orchestration
+4. Market and financial analysis
+5. News prompt chain, stage by stage
+6. Partial failure handling
+7. Initial report
+8. Evaluation
+9. Optimization and the refined report
+10. Self-reflection
+11. Learning across runs
+12. Summary and requirement checklist
 
 ## Scoring Demonstration Checklist
 
+Notebook section numbers are in brackets.
+
 ### Workflow Patterns
 
-- [ ] Prompt Chaining executes all five stages.
-- [ ] Intermediate news output is displayed after every stage.
-- [ ] Routing selects appropriate subagents.
-- [ ] Selected and skipped subagents include reasons.
-- [ ] A multi-subagent route is demonstrated.
-- [ ] Initial report is generated.
-- [ ] Evaluator feedback is displayed.
-- [ ] Weak sections are refined.
-- [ ] Before-and-after scores are visualized.
+- [x] Prompt Chaining executes all five stages. [5]
+- [x] Intermediate news output is displayed after every stage. [5]
+- [x] Routing selects appropriate subagents. [2]
+- [x] Selected and skipped subagents include reasons. [2]
+- [x] A multi-subagent route is demonstrated. [2, 3]
+- [x] Initial report is generated. [7]
+- [x] Evaluator feedback is displayed. [8]
+- [x] Weak sections are refined. [9]
+- [x] Before-and-after scores are visualized. [9]
 
 ### Agent Functions
 
-- [ ] Planner generates an ordered research plan.
-- [ ] Plan execution and status are displayed.
-- [ ] Tools are selected dynamically.
-- [ ] Tool-call logs are displayed.
-- [ ] Agent reflects on successful and failed steps.
-- [ ] Reflection produces reusable lessons.
-- [ ] Lessons are saved to SQLite.
-- [ ] A second run retrieves and applies a lesson.
+- [x] Planner generates an ordered research plan. [1]
+- [x] Plan execution and status are displayed. [3]
+- [x] Tools are selected dynamically. [2, 3]
+- [x] Tool-call logs are displayed. [3]
+- [x] Agent reflects on successful and failed steps. [10]
+- [x] Reflection produces reusable lessons. [10, 11]
+- [x] Lessons are saved to SQLite. [11]
+- [x] A second run retrieves and applies a lesson. [11]
 
 ### Comments and Visualizations
 
-- [ ] Major functions include docstrings.
-- [ ] Non-obvious logic includes reasoning comments.
-- [ ] Assumptions and limitations are documented.
-- [ ] Charts contain titles, labels, units, and legends.
-- [ ] Every chart includes a short interpretation.
-- [ ] Architecture and workflow diagrams are included.
+- [x] Major functions include docstrings.
+- [x] Non-obvious logic includes reasoning comments.
+- [x] Assumptions and limitations are documented. [12, and every report's limitations section]
+- [x] Charts contain titles, labels, units, and legends.
+- [x] Every chart includes a short interpretation.
+- [x] Architecture and workflow diagrams are included. [0, 10, 11; architecture.md]
 
 ## Running Tests
 
-Run the complete test suite:
+The suite has 158 tests. They run offline: data tools, specialists and LLMs are replaced by stubs and scripted fakes.
 
 ```bash
 pytest -v
@@ -542,36 +513,31 @@ pytest -v
 Run an individual test module:
 
 ```bash
-pytest tests/test_planner.py -v
+pytest tests/test_evaluator.py -v
 ```
 
-Recommended minimum test areas:
+Areas covered:
 
-- Planner schema validation
-- Single and multi-subagent routing
-- Unknown-tool rejection
-- Return and volatility calculations
-- News deduplication
-- Evaluator score calculation
-- Optimizer stopping conditions
-- SQLite memory persistence
+- Planner schema validation, routing, unknown-tool rejection and orchestration (Engineer 1)
+- Return, volatility, drawdown, growth and margin calculations, news deduplication, classification and extraction (Engineer 2)
+- Report generation, evaluator scoring and numeric checks, optimizer stopping conditions, reflection rules, SQLite memory persistence, and an end-to-end second run that applies a lesson (Engineer 3)
+- LLM client selection, the Gemini client and the response cache
 - Failure handling for unavailable APIs
 
 ## Output Files
 
-Generated artifacts should be written to `outputs/`:
+Each run writes inspectable files to `outputs/` (gitignored):
 
 ```text
 outputs/
 ├── reports/
-│   ├── initial_report.md
-│   └── final_report.md
-├── charts/
-│   ├── market_performance.png
-│   ├── news_pipeline.png
-│   └── evaluation_comparison.png
-└── logs/
-    └── latest_run.json
+│   ├── initial_report.md, final_report.md          latest run
+│   └── <SYMBOL>_<run_id>_initial.md, ..._final.md  every run
+├── charts/                                         every chart shown in the notebook
+├── logs/
+│   ├── latest_run.json                             plan, routing, tool calls, evaluations, reflection
+│   └── <SYMBOL>_<run_id>.json
+└── notebook_memory.db                              the notebook's own memory file
 ```
 
 ## Error-Handling Rules

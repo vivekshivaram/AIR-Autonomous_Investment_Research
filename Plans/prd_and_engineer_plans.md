@@ -74,7 +74,7 @@ Implements the required Prompt Chaining workflow:
 
 ### Evaluator–Optimizer
 
-- Evaluates grounding, completeness, consistency, recency, risk coverage, clarity, and uncertainty.
+- Evaluates grounding, completeness, numeric consistency, recency, risk coverage, catalyst coverage, clarity, and uncertainty.
 - Produces structured feedback.
 - Refines only weak sections.
 - Stops after reaching the quality threshold or maximum refinement count.
@@ -375,7 +375,7 @@ Build the final research-report pipeline, evaluator–optimizer workflow, self-r
 ### Day 2: Evaluator
 
 - Implement the quality rubric.
-- Score grounding, completeness, consistency, recency, risk coverage, clarity, and uncertainty.
+- Score grounding, completeness, numeric consistency, recency, risk coverage, catalyst coverage, clarity, and uncertainty.
 - Generate structured issues and corrective actions.
 - Display the initial score and evaluation details.
 
