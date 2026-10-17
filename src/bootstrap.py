@@ -6,7 +6,8 @@ Integration contract (module -> attribute):
   earnings_agent     run_earnings_agent(state, tools, step)
   news_agent         run_news_agent(state, tools, step)
   memory             retrieve_lessons(symbol, question) -> list[MemoryItem | dict]; store_lesson(...)
-  report_generator   run_report_pipeline(state) -> AgentState   (report, evaluator-optimizer, reflection)
+  report_generator   make_report_pipeline(llm, settings, tools) -> (state) -> AgentState, or
+                     run_report_pipeline(state) -> AgentState   (report, evaluator-optimizer, reflection)
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from types import ModuleType
 from typing import Any, Callable
 
 from .config import Settings
+from .llm_cache import CachedLLM, with_cache
 from .llm_client import create_llm_client
 from .models import SUBAGENT_EARNINGS, SUBAGENT_MARKET, SUBAGENT_NEWS
 from .orchestrator import Orchestrator
@@ -41,6 +43,8 @@ _AGENT_ENTRYPOINTS = {
 
 @dataclass
 class Runtime:
+    """Everything one notebook session needs: the planner, orchestrator, registries and LLM client."""
+
     planner: Planner
     orchestrator: Orchestrator
     tools: ToolRegistry
@@ -65,8 +69,14 @@ def build_runtime(
     llm: Any = None,
     allow_stubs: bool = True,
 ) -> Runtime:
+    """Build the planner and orchestrator with every module that is present.
+
+    Real modules replace stubs automatically; ``integration`` records which components are real, stubbed
+    or missing so nothing is silently faked. Without an explicit ``llm`` the configured API client is
+    created and wrapped in the on-disk response cache (``LLM_CACHE_HOURS``, 0 disables it).
+    """
     settings = settings or Settings()
-    llm = llm or create_llm_client()
+    llm = llm or with_cache(create_llm_client())
     tools, subagents = ToolRegistry(), default_subagent_registry()
     integration: dict[str, str] = {}
 
@@ -104,9 +114,14 @@ def build_runtime(
         "missing" if not (data_tools or stub_tools) else "real" if not stub_tools else "partial" if data_tools else "stub"
     )
     integration["llm"] = getattr(llm, "provider", "unknown")
+    integration["llm_cache"] = "on" if isinstance(llm, CachedLLM) else "off"
 
     report_module = _load("report_generator")
-    pipeline = getattr(report_module, "run_report_pipeline", None) if report_module else None
+    pipeline: Callable[..., Any] | None = None
+    if report_module is not None:
+        factory = getattr(report_module, "make_report_pipeline", None)
+        # The factory binds this runtime's LLM, settings and tool registry, so memory writes are logged tool calls.
+        pipeline = factory(llm=llm, settings=settings, tools=tools) if callable(factory) else getattr(report_module, "run_report_pipeline", None)
     integration["report_pipeline"] = "real" if pipeline else "missing"
 
     planner = Planner(subagents, tools, llm=llm, settings=settings)
