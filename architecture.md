@@ -416,3 +416,81 @@ report_generator  run_report_pipeline(state) -> AgentState
 ```
 
 Subagents call tools with `tools.call("get_price_history", symbol=...)`, which returns a `ToolCallResult` (never raises) and appends a log entry to `state.tool_call_log`.
+
+## 14. Engineer 3 Implementation: Report, Evaluation, Reflection and Memory
+
+### Modules
+
+| Module | Role |
+| --- | --- |
+| `src/report_models.py` | `ResearchReport`, `ReportSection`, `ReportStatement`, `EvaluationResult`, `CriterionScore`, `ReportIssue`, `RunReflection`, `Lesson` |
+| `src/report_evidence.py` | Evidence pack built from `state.aggregated`: numbered risks (R), catalysts (C) and limitations (L), profile facts (PRO), news event tags mapped to NEWS evidence IDs |
+| `src/report_generator.py` | First draft (LLM under a JSON schema, template fallback) and the pipeline entry point `run_report_pipeline` / `make_report_pipeline` |
+| `src/evaluator.py` | Eight-criterion rubric, issues with corrective actions, accept-or-refine decision |
+| `src/optimizer.py` | Targeted section refinement and the stop rules of the Evaluator-Optimizer loop |
+| `src/reflection.py` | Structured run reflection and rule-based lessons with machine-readable hints |
+| `src/memory.py` | SQLite memory: `lessons`, `runs`, `lesson_usage`; `retrieve_lessons`, `store_lesson`, `record_run` |
+| `src/run_outputs.py` | Reports, run log and charts under `outputs/` |
+| `src/evaluation_viz.py`, `src/chart_notes.py` | Evaluation, learning and workflow charts, and data-driven chart interpretations |
+| `src/llm_cache.py` | On-disk LLM response cache that keeps notebook re-runs repeatable |
+
+### Pipeline
+
+```mermaid
+flowchart TD
+    AG[state.aggregated] --> PK[Evidence pack: R, C, L, PRO, NEWS ids]
+    MEMR[(SQLite memory)] -- report_guidance lessons --> W
+    PK --> W[Report writer: first draft v0]
+    W --> EV[Evaluator: 8 criteria]
+    EV --> D{Score >= 80 and no criterion < 60?}
+    D -->|Yes| FIN[Final report: best version]
+    D -->|No| STOP{2 cycles done or gain < 2 points?}
+    STOP -->|Yes| FIN
+    STOP -->|No| OPT[Optimizer: rewrite weak sections, locked statements kept]
+    OPT --> EV
+    FIN --> RF[Reflection: successes, failures, gaps, issues fixed]
+    RF -->|memory_storage tool| MEMW[(SQLite memory)]
+    MEMW -->|memory_retrieval tool before planning| PL[Planner of the next run]
+```
+
+1. The orchestrator hands the aggregated state to `run_report_pipeline(state)`; `bootstrap.build_runtime` binds the runtime's LLM, settings and tool registry through `make_report_pipeline`.
+2. The writer drafts each section as statements. Each statement is a `fact` (cites evidence; numbers must match), an `interpretation` (labelled) or a `disclosure` (scope, dates, gaps). Citations to IDs outside the pack are removed. The company overview, confidence level and sources table are built in code.
+3. The evaluator scores the draft. Seven criteria are checked in code against the pack; clarity is judged by the LLM with a heuristic fallback. Every issue names a section, often a statement, and a corrective action.
+4. The optimizer rewrites only the sections with actionable issues. Statements without issues are locked: the LLM is asked to keep them word for word, and a locked statement is restored if the rewrite drops its evidence, risk, catalyst or limitation IDs (a rewording that keeps its citations is accepted, so merged statements are not duplicated). The loop stops on acceptance, after `Settings.max_refinement_cycles`, or when a cycle gains less than two points, and the best-scoring version becomes `state.final_report`.
+5. Reflection turns the run into lessons through explicit rules, stores them through the `memory_storage` tool, and records the run with the lessons it retrieved and applied.
+6. Every stage is contained: a failure becomes a warning, and the aggregated evidence and the draft survive.
+
+### Rubric
+
+| Criterion | Weight | Measured as |
+| --- | --- | --- |
+| Evidence grounding | 20 | Share of facts citing valid evidence; data sections must state facts |
+| Completeness | 15 | Sections filled, findings reflected, coverage gaps explained, price moves linked to news or their drivers disclosed |
+| Numeric consistency | 15 | Numbers in facts matched to cited evidence values, claims and the specialists' own sentences, with unit, scale, rounding and sign handling |
+| Source recency | 10 | Cited evidence inside freshness limits (prices 7 days, news the lookback window, statements 15 months, FRED 120 days) and periods stated |
+| Risk coverage | 10 | Share of specialist risks covered |
+| Catalyst coverage | 10 | Share of specialist catalysts covered; full credit when news was not run and the section says so |
+| Clarity | 10 | LLM judgement from 1 to 5, scaled to 100; heuristics on sentence length, repetition and crowding as the fallback |
+| Uncertainty disclosure | 10 | Confidence with reasons, every limitation disclosed, no certain or advisory wording in the agent's own voice |
+
+### Learning loop
+
+Lessons carry hints the rest of the system already understands. `require_subagents` and `extra_criteria` are applied by `Planner._apply_lessons`; `report_guidance` is passed to the writer and the optimizer as style guidance. A symbol lesson that adds a specialist is retrieved only for questions on the same topic, and general lessons never add specialists, so one symbol's lesson cannot reroute another. Lesson IDs (MEM-0001) are not evidence IDs, so a report that cited memory would fail the grounding check.
+
+| Trigger | Scope | Hint |
+| --- | --- | --- |
+| Price analysis ran without news and the drivers were unexplained | Symbol | `require_subagents: [news_agent]` |
+| A selected specialist failed | General | `extra_criteria` for that specialist |
+| Numeric or citation issues in the first draft | General | `report_guidance` |
+| Risks or catalysts missing from the first draft | General | `report_guidance` |
+| Latest annual statements older than nine months | Symbol | `extra_criteria` for the earnings specialist |
+
+### Integration contract additions
+
+```text
+report_generator   make_report_pipeline(llm, settings, tools) -> (state) -> AgentState
+                   run_report_pipeline(state, *, llm=None, settings=None, tools=None, save_outputs=True)
+memory             retrieve_lessons(symbol, question) -> list[dict]   registered as memory_retrieval
+                   store_lesson(lesson, *, scope, symbol, tags, hint, trigger, source_run_id)   registered as memory_storage
+AgentState         draft_report, final_report, evaluation_history, reflection, output_files
+```
