@@ -100,12 +100,17 @@ def plot_routing_matrix(cases: Mapping[str, Sequence[RoutingDecision]], agents: 
     fig, ax = plt.subplots(figsize=(1.6 * len(agents) + 3, 0.55 * len(cases) + 1.5))
     ax.imshow(data.values, cmap="Blues", vmin=0, vmax=1.4, aspect="auto")
     ax.set_xticks(range(len(agents)), [a.replace("_agent", "") for a in agents])
-    ax.set_yticks(range(len(data)), [f"{l[:55]}" for l in data.index])
+    ax.set_yticks(range(len(data)), [label if len(label) <= 70 else label[:67] + "..." for label in data.index])
     for i in range(data.shape[0]):
         for j in range(data.shape[1]):
             ax.text(j, i, "run" if data.iat[i, j] else "skip", ha="center", va="center",
                     color="white" if data.iat[i, j] else "#666")
     ax.set_title("Routing decisions by research question")
+    ax.set_xlabel("Specialist subagent")
+    ax.set_ylabel("Research question")
+    run_color, skip_color = plt.cm.Blues(1 / 1.4), plt.cm.Blues(0.0)  # the same colours imshow uses above
+    ax.legend(handles=[Patch(color=run_color, label="run (selected)"), Patch(facecolor=skip_color, edgecolor="#bbbbbb", label="skip (not selected)")],
+              loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2, frameon=False, fontsize=8)
     fig.tight_layout()
     return ax
 
@@ -118,8 +123,10 @@ def plot_execution_timeline(state: AgentState) -> plt.Axes:
     ax.barh(labels, [e["duration_ms"] for e in log], color=[STATUS_COLORS.get(e["status"], "#888") for e in log])
     ax.invert_yaxis()
     ax.set_xlabel("Duration (ms)")
+    ax.set_ylabel("Plan step")
     ax.set_title("Subagent execution")
-    ax.legend(handles=[Patch(color=c, label=s) for s, c in STATUS_COLORS.items()], loc="lower right", fontsize=8)
+    ax.legend(handles=[Patch(color=c, label=s) for s, c in STATUS_COLORS.items()], loc="center left", bbox_to_anchor=(1.01, 0.5),
+              fontsize=8, frameon=False)
     fig.tight_layout()
     return ax
 
@@ -132,6 +139,9 @@ def plot_tool_calls(state: AgentState) -> plt.Axes:
     ax.barh(labels, df["duration_ms"], color=[STATUS_COLORS[Status.SUCCESS] if s == Status.SUCCESS else STATUS_COLORS[Status.FAILED] for s in df["status"]])
     ax.invert_yaxis()
     ax.set_xlabel("Duration (ms)")
+    ax.set_ylabel("Caller: tool")
     ax.set_title("Tool calls (conditional tool selection)")
+    ax.legend(handles=[Patch(color=STATUS_COLORS[Status.SUCCESS], label="success"), Patch(color=STATUS_COLORS[Status.FAILED], label="failed")],
+              loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, frameon=False)
     fig.tight_layout()
     return ax

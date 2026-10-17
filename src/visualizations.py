@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 STOCK_COLOR, BENCHMARK_COLOR, NEUTRAL = "#1f5fa8", "#8a8a8a", "#c9c9c9"
@@ -30,7 +31,22 @@ def plot_performance(performance: pd.DataFrame):
     return _finish(ax, "Price performance, rebased to 100", "Date", "Index (start = 100)")
 
 
+def plot_daily_return_distribution(performance: pd.DataFrame):
+    """Histogram of daily returns for the stock and the benchmark, from the rebased performance series."""
+    returns = performance.pct_change().dropna() * 100
+    fig, ax = plt.subplots(figsize=(9, 4))
+    low, high = returns.min().min(), returns.max().max()
+    bins = np.linspace(low, high, 41)
+    for column, color in zip(returns.columns, _line_colors(returns)):
+        ax.hist(returns[column], bins=bins, alpha=0.55 if column != returns.columns[0] else 0.8, color=color,
+                label=f"{column} (sd {returns[column].std():.2f}%)")
+    ax.axvline(0, color=NEUTRAL, linewidth=0.8, linestyle="--")
+    ax.legend(frameon=False)
+    return _finish(ax, "Distribution of daily returns", "Daily return (%)", "Number of trading days")
+
+
 def plot_rolling_volatility(volatility: pd.DataFrame, window: int = 21):
+    """Rolling annualized volatility of the stock and the benchmark, in percent."""
     ax = volatility.plot(figsize=(9, 4), color=_line_colors(volatility), linewidth=1.8)
     ax.legend(frameon=False)
     return _finish(ax, f"Rolling {window}-day volatility, annualized", "Date", "Volatility (%)")
@@ -46,6 +62,7 @@ def plot_financial_trends(trends: pd.DataFrame, currency: str = ""):
 
 
 def plot_margins(margins: pd.DataFrame):
+    """Gross, operating, net and free-cash-flow margins per fiscal year, in percent of revenue."""
     labels = {"gross_margin": "Gross", "operating_margin": "Operating", "net_margin": "Net", "fcf_margin": "Free cash flow"}
     data = margins.dropna(axis=1, how="all").rename(columns=labels)
     ax = data.plot(figsize=(9, 4), marker="o", linewidth=1.8)
@@ -55,7 +72,7 @@ def plot_margins(margins: pd.DataFrame):
 
 def plot_news_funnel(funnel: dict[str, int]):
     """Article count remaining after each processing step of the news chain."""
-    labels = [name.replace("_", " ").capitalize() for name in funnel]
+    labels = [name.replace("_", " ").capitalize().replace(" llm", " LLM") for name in funnel]
     fig, ax = plt.subplots(figsize=(9, 4))
     bars = ax.barh(labels[::-1], list(funnel.values())[::-1], color=STOCK_COLOR)
     ax.bar_label(bars, padding=3)
@@ -71,17 +88,3 @@ def plot_news_categories(category_counts: dict[str, int], impact_counts: dict[st
     impacts = pd.Series(impact_counts)
     right.bar(impacts.index, impacts.values, color=[IMPACT_COLORS.get(i, NEUTRAL) for i in impacts.index])
     return _finish(right, "By expected impact", "Impact", "Number of articles")
-
-
-def plot_subagent_calls(runs: dict[str, list]):
-    """Which subagents the main agent called for each question. ``runs`` maps a label to SubagentCalls."""
-    table = pd.DataFrame({label: {call.subagent: int(call.called) for call in calls} for label, calls in runs.items()}).T
-    fig, ax = plt.subplots(figsize=(8, 0.6 * len(table) + 1.6))
-    ax.imshow(table.values, cmap="Blues", vmin=0, vmax=1.4, aspect="auto")
-    ax.set_xticks(range(table.shape[1]), table.columns)
-    ax.set_yticks(range(len(table)), table.index)
-    for row in range(table.shape[0]):
-        for column in range(table.shape[1]):
-            called = table.iat[row, column]
-            ax.text(column, row, "called" if called else "not called", ha="center", va="center", color="white" if called else "#555555")
-    return _finish(ax, "Subagents the main agent called, per question", "Subagent", "")
